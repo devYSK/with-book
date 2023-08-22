@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ExternalStorageConfigurationManager" enabled="true" />
+  <component name="FrameworkDetectionExcludesConfiguration">
+    <file type="web" url="file://$PROJECT_DIR$/Chapter12/Exception" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter12/JavaPersonProperty" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter12/JvmName" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter12/JvmNameAvoidNameCollision" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter12/JvmOverloads" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter12/JvmStatic" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter12/PersonProperty" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter12/PersonPropertyNullAnnotation" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter12/Type" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter13/Actor" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter13/Channel" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter13/JavaThread" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter13/Suspend" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter14/KoTest" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter15/ComposeCalculator" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter15/HelloWorld" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter16/ktor-client" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter16/ktor-example" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter16/ktor-random" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter16/ktor-session" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter17/passwordGen" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter17/passwordGenKtor" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter17/randomGen" />
+    <file type="web" url="file://$PROJECT_DIR$/Chapter17/spring" />
+  </component>
+  <component name="ProjectType">
+    <option name="id" value="jpab" />
+  </component>
+</project>

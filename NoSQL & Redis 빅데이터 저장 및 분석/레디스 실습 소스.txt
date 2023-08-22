@@ -1,0 +1,228 @@
+p61
+> hmset order:201809123  customer_name "Wonman & Sports" emp_name "Magee" total 601100 payment_type "Credit" order_filled "Y" ship_date 20180925
+> hget order:201809123 customer_name 
+> hget order:201809123 ship_date 
+> hgetall order:201809123 
+> hexists order:201809123 product_name 
+> hexists order:201809123 customer_name 
+> hdel order:201809123 ship_date 
+> hgetall order:201809123
+
+p62
+> hmset order:201809123 ship_date 20180925 
+> hgetall order:201809123
+> hkeys order:201809123 
+> hvals order:201809123 
+> hlen order:201809123 
+> hmget order:201809123 emp_name  total 
+
+p63
+> lpush order_detail:201809123 "<item_id>1</item_id><product_name>Bunny Boots </product_name><item_price>135</item_price><qty>500</qty><price>67000</price>" "<item_id>2</item_id><product_name>Pro Ski Boots</product_name><item_price>380 </item_price><qty>400</qty><price>152000</price>" 
+> lrange order_detail:201809123 0 10
+
+p64
+> rpush order_detail:201809123 "<item_id>3</item_id><product_name>Bunny Boots</produc t_name><item_price>135</item_price><qty>10</qty><price>13500</price>" 
+> lrange order_detail:201809123 0 10
+> rpop order_detail:201809123 
+> lrange order_detail:201809123 0 10 
+> llen order_detail:201809123 
+> lindex order_detail:201809123  0 
+> lindex order_detail:201809123  1 
+> lindex order_detail:201809123  2 
+> lset order_detail:201809123 0 "<item_id>2</item_id><product_name>Pro Ski Boots </product_name><item_price>380</item_price><qty>200</qty><price>76000</price>" 
+> lrange order_detail:201809123 0 10   
+
+p65
+> lpushx order_detail:201809123 "<item_id>4</item_id><product_name>Bunny Boots</product _name><item_price>135</item_price><qty>500</qty><price>67000</price>" 
+> lrange order_detail:201809123 0 10 
+> linsert order_detail:201809123 before "<item_id>2</item_id><product_name>Pro Ski Boots </product_name><item_price>380</item_price><qty>200</qty><price>76000</price>" "<item_id>3</item_id><product_name>Bunny Boots</product_name><item_price>135</item _price><qty>10</qty><price>13500</price>" 
+> lrange order_detail:201809123 0 10
+> lpush order_detail:201809124 "{ item_id:1, product_name:Bunny Boots, item_price:135, qty:500, price:67000 }" "{ item_id:2, product_name:Pro Ski Boots, item_price:380, qty:400, price:152000 }"
+> lrange order_detail:201809124 0 1 
+
+p66
+> SADD product "id:11, product_name:Sky Pole, item_price:55, qty:100, price:5500" "id:12, product_name:Bunny Boots, item_price:135, qty:500, price:67000" 
+> SMEMBERS product 
+> SCARD product 
+
+p67
+> SADD product_old "id:91, product_name:Old Sky Pole" 
+> SMEMBERS product_old 
+> SDIFF product product_old 
+> SDIFF product_old product
+> SDIFFSTORE product_diff product product_old 
+> SMEMBERS product_diff 
+> SUNION product product_old 
+> SUNIONSTORE product_new product product_old 
+> SMEMBERS product_new 
+> SREM product_new "id:11, product_name:Sky Pole, item_price:55, qty:100, price:5500" 
+> SMEMBERS product_new 
+
+p68
+> SPOP product_new 1 
+> SMEMBERS product_new 
+> SMEMBERS product 
+> SADD product.id.index 1 13 
+> SADD product.id.index 2 12 
+> SADD product.id.index 3 11 
+
+p69
+> ZADD order_detail:201809123 1 "{ product_name:Bunny Boots, item_price:135, qty:500, price:67000 }" 2 "{ product_name:Pro Ski Boots, item_price:380, qty:400, price:152000 }" 3 "{ product_name:Bunny Boots, item_price:135, qty:10, price:13500 }" 
+> ZRANGE order_detail:201809123 0 -1 
+> ZADD order_detail:201809123 3 "{ product_name:Ski Pants, item_price:100, qty:10, price:1000 }" 
+> ZRANGE order_detail:201809123 0 -1
+> ZCARD order_detail:201809123 
+> ZCOUNT order_detail:201809123 1 3 
+> ZREM order_detail:201809123 "{ product_name:Pro Ski Boots, item_price:380, qty:400, price:152000 }" 
+> ZRANK order_detail:201809123 "{ product_name:Ski Pants, item_price:100, qty:10, price:1000 }" 
+> ZRANK order_detail:201809123 "{ product_name:Bunny Boots, item_price:135, qty:500, price:67000 }" 
+
+p70
+> ZRANK order_detail:201809123 "{ product_name:Bunny Boots, item_price:135, qty:10, price:13500 }" 
+> ZREVRANK order_detail:201809123 "{ product_name:Ski Pants, item_price:100, qty:10, price:1000 }" 
+> ZREVRANK order_detail:201809123 "{ product_name:Bunny Boots, item_price:135, qty:10, price:13500 }" 
+> ZREVRANK order_detail:201809123 "{ product_name:Bunny Boots, item_price:135, qty:500, price:67000 }" 
+> ZSCORE order_detail:201809123 "{ product_name:Bunny Boots, item_price:135, qty:500, price:67000 }" 
+> ZSCORE order_detail:201809123 "{ product_name:Bunny Boots, item_price:135, qty:10, price:13500 }" 
+> ZSCORE order_detail:201809123 "{ product_name:Ski Pants, item_price:100, qty:10, price:1000 }" 
+
+p71
+> setbit customer 1001 1  
+> setbit customer 1002 0 
+> setbit customer 1003 1
+> setbit customer 1004 1 
+> setbit customer 1005 0 
+> getbit customer 1001 
+> getbit customer 1002 
+> bitcount customer 0 -1  
+
+p72
+> GEOADD position 127.1058431 37.5164113 "Jamsil_Station" 127.0980748 37.5301218 "East_Bus_Terminal"
+> GEOPOS position "Jamsil_Station" "East_Bus_Terminal" nonexisting 
+> GEODIST position "Jamsil_Station" "East_Bus_Terminal" 
+> GEORADIUS position 127  37  200 km  ASC 
+> GEORADIUS position 127  37  200 km  DESC 
+> GEOHASH position "Jamsil_Station" "East_Bus_Terminal"
+> GEORADIUSBYMEMBER position  "GangByeon_Station"  100 km 
+
+p73
+> PFADD credit_type "Cash" "Credit Card" "Point" "Ckeck" "Cash" 
+> PFADD domestic_city  "Seoul" "Busan" "Daejeon" "Gwangju" "Daegu" "Busan" 
+> PFADD foreign_city  "Los Angeles" "San Diego" "New York" "Wasington" (
+> PFCOUNT credit_type 
+> PFCOUNT domestic_city 
+> PFCOUNT foreign_city 
+> PFMERGE international_city domestic_city foreign_city 
+> PFCOUNT international_city 
+
+p76
+> JSON.SET 1101 . '"JM JOO"' 
+> JSON.GET 1101 
+> JSON.TYPE 1101 . 
+> JSON.STRLEN 1101 . 
+> JSON.STRAPPEND 1101 . '"SEOUL"' 
+> JSON.GET 1101 
+> JSON.SET orderno . 20180901000 
+> JSON.NUMINCRBY orderno . 1 
+> JSON.NUMINCRBY orderno . 2 
+> JSON.SET amoreinterestingexample . '[true, { "age": 52 }, null ]' 
+> JSON.GET amoreinterestingexample 
+
+p77
+> JSON.GET amoreinterestingexample [1].age 
+> JSON.DEL amoreinterestingexample [-1] 
+> JSON.GET amoreinterestingexample 
+> JSON.SET array_data . [] 
+> JSON.ARRAPPEND array_data . 0 
+> JSON.GET array_data 
+> JSON.ARRINSERT array_data . 0 -1 -2 
+> JSON.GET array_data 
+> JSON.ARRTRIM  array_data . 1 1 
+> JSON.GET array_data 
+> JSON.ARRPOP  array_data 
+> JSON.ARRPOP  array_data 
+> JSON.SET 1101 . '{ "name":"JM JOO", "age":35, "address":"Seoul" }' 
+> JSON.OBJLEN 1101 . 
+
+p79
+> REDISQL.CREATE_DB SALES 
+> REDISQL.EXEC  SALES "CREATE TABLE emp(no int, name text, address text, deptno int);" 
+> REDISQL.EXEC  SALES "INSERT INTO emp VALUES (1101, 'JM JOO', 'SEOUL', 10);" 
+> REDISQL.EXEC  SALES "SELECT * FROM emp;" 
+> REDISQL.EXEC  SALES "CREATE TABLE dept(deptno int, dname text);"
+> REDISQL.EXEC  SALES "INSERT INTO dept VALUES (10, 'Computer Team');" 
+> REDISQL.EXEC  SALES "INSERT INTO dept VALUES (20, 'Sales Team');"
+> REDISQL.EXEC  SALES "SELECT * FROM dept;" 
+
+p80
+> REDISQL.EXEC  SALES "SELECT * FROM dept, emp WHERE dept.deptno = emp.deptno;" 
+> REDISQL.EXEC  SALES "CREATE TABLE text_search(data text);" 
+> REDISQL.EXEC  SALES "INSERT INTO text_search VALUES ('Computer Team');" 
+> REDISQL.EXEC  SALES "INSERT INTO text_search VALUES ('Sales Team');" 
+> REDISQL.EXEC  SALES "INSERT INTO text_search VALUES ('Facility Team');" 
+> REDISQL.EXEC  SALES "SELECT * FROM text_search WHERE data LIKE 'A%';" 
+
+p89
+> ZADD order.ship_date.index 2 '201809124:20180926' 
+> ZADD order.ship_date.index 1 '201809123:20180925'
+> ZRANGE order.ship_date.index 0 -1 
+> ZSCAN order.ship_date.index 0 match 201809124* 
+> ZADD order.no.index 1 201809123 
+> ZADD order.no.index 2 201809124 
+> ZRANGE order.no.index 0 -1 
+
+> ZADD product.name.index 0 "Sky Pole" 
+> ZADD product.name.index 0 "Bunny Boots" 
+> ZADD product.name.index 0 "Ski Pants" 
+> ZADD product.name.index 0 "Mountain Pants" 
+> ZRANGEBYLEX product.name.index [S + 
+> ZRANGEBYLEX product.name.index [B [S
+
+p91
+> ZRANGEBYLEX product.name.index [B [T 
+> ZRANGEBYLEX product.name.index [B (N 
+
+> hmset order_index no:201809123 customer_name:"Wonman & Sports" emp_name:"Magee" total:601100 payment_type:"Credit" order_filled:"Y" 
+> hmset order_index no:201809124 customer_name:"PIT co." emp_name:"JM JOO" total:5000 payment_type:"Credit" order_filled:"Y" 
+> hscan order_index 0 
+
+p104
+> hmset order:201809123 customer_name "Wonman & Sports" emp_name "Magee¡°  total 601100 payment_type "Credit" order_filled "Y" 
+> hgetall order:201809123
+
+p105
+> hmset translate:201809123 translate_no 6723120 customer_name "Wonman & Sports¡°  zip_code 15881 address "Seoul Songpa 58" order_amount 60100 
+> hgetall translate:201809123
+
+p107
+> hmset order:201809123 customer_name "Wonman & Sports" emp_name "Magee"  total 601100 payment_type "Credit" order_filled "Y" 
+> hgetall order:201809123
+> lpush order_detail:201809123 "<item_id>1</item_id><product_name>Bunny Boots </product_name><item_price>135</item_price><qty>500</qty><price>67000</price>" "<item_id>2</item_id><product_name>ProSki Boots</product_name><item_price>380 </item_price><qty>400</qty><price>152000</price>" 
+> lrange order_detail:201809123 0 1
+
+p109
+> lpush product:p1001 "{ pname : 'Asus EP121 M50', cname : { [ cname1 : c1000, cname2 : c1002, cname3 : c1003 ] }" 
+> lrange product:p1001 0 -1 
+> lpush category:c1000 "{ cname : 'Tablet', pname : { [ pname1 : p1001 , pname2 : p1002 ] } }" 
+> lrange category:c1000 0 -1 
+
+p111
+> SADD employee "id:1101, name:JMJoo, age:25, telephone:01038641858"  "id:1102, name:YHKim, age:21, parent_id:1101, childlen_id:1103"   "id:1103, name:KOHong, age:38, parent_id:1102, ancestor_id:1101
+> SMEMBERS employee
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

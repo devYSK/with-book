@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.ys.chap2.StringCalculatorTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2023-03-26T18:48:32" hostname="MacBook-Pro-4.local" time="0.012">
+  <properties/>
+  <testcase name="null 또는 빈 문자" classname="com.ys.chap2.StringCalculatorTest" time="0.008"/>
+  <testcase name="음수 전달시 예외를 던진다" classname="com.ys.chap2.StringCalculatorTest" time="0.001"/>
+  <testcase name="숫자 하나" classname="com.ys.chap2.StringCalculatorTest" time="0.0"/>
+  <testcase name="쉼표 또는 콜론 구분자" classname="com.ys.chap2.StringCalculatorTest" time="0.0"/>
+  <testcase name="쉼표 구분자" classname="com.ys.chap2.StringCalculatorTest" time="0.0"/>
+  <testcase name="커스텀 구분자" classname="com.ys.chap2.StringCalculatorTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

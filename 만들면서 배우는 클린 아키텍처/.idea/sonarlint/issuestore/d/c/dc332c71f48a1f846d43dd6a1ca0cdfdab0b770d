@@ -1,0 +1,7 @@
+
+f
+java:S1104"PMake ZERO a static final constant or non-public and provide accessors if needed.(™ІРй
+@
+java:S1444"*Make this "public static ZERO" field final(™ІРй
+e
+java:S3008"ORename this field "ZERO" to match the regular expression '^[a-z][a-zA-Z0-9]*$'.(™ІРй

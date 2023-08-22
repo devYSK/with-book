@@ -1,0 +1,17 @@
+
+g	java:S112%"FDefine and throw a dedicated exception instead of using a generic one.(ì¿åŞûÿÿÿÿ8€­µíò0
+b	java:S1122"FDefine and throw a dedicated exception instead of using a generic one.(±‹Ûõ8€­µíò0
+g	java:S112:"FDefine and throw a dedicated exception instead of using a generic one.(ÒÁµıùÿÿÿÿ8€­µíò0
+g	java:S112g"FDefine and throw a dedicated exception instead of using a generic one.(éì™ıÿÿÿÿ8æÔµíò0
+f
+java:S1192&"KDefine a constant instead of duplicating this literal "questionId" 4 times.(¬ÄÓ•ıÿÿÿÿ
+d
+java:S1192,"IDefine a constant instead of duplicating this literal "question" 3 times.(»‚ğİÿÿÿÿÿ
+u
+java:S11924"ZDefine a constant instead of duplicating this literal "redirect:/users/loginForm" 5 times.(–„ıÓÿÿÿÿÿ
+f
+java:S1192B"KDefine a constant instead of duplicating this literal "redirect:/" 3 times.(ŸÎ­Ğøÿÿÿÿ
+‰
+java:S11302"lRemove the declaration of thrown exception 'java.lang.Exception', as it cannot be thrown from method's body.(±‹Ûõ8ˆ­µíò0
+
+java:S1130:"lRemove the declaration of thrown exception 'java.lang.Exception', as it cannot be thrown from method's body.(ÒÁµıùÿÿÿÿ8‰­µíò0
