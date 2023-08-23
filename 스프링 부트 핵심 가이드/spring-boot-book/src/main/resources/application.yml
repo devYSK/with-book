@@ -1,0 +1,7 @@
+## actuator ?? ?? ?? (???? /actuator ??)
+## ?? 11.2
+
+management:
+  endpoints:
+    web:
+      base-path: /custom-path
