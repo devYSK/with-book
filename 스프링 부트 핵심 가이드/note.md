@@ -947,3 +947,211 @@ ResponseEntity<String> responseEntity = webClient.get()
   .block();
 ```
 
+
+
+# 스프링 시큐리티
+
+스프링 시큐리티는 Servlet Filter 기반으로 동작하며 DeispatcherServlet 앞에 필터가 배치됌
+
+<img src="./images/note//image-20230824010555492.png">
+
+FilterChain(필터체인)은 서블릿 컨테이너 관리하는 ApplicationFilterChain
+
+스프링 시큐리티는 사용하고자 하는 필터체인을 서블릿 컨테이너의 필터 사이에서 동 작시키기 위해  DelegatingFilterProxy를 사용
+
+<img src="./images/note//image-20230824010649316.png">
+
+DelegatingFilterProxy 는 서블릿 컨테이너의 생명주기와 스프링 애플리케이션 컨텍스트(Application Context) 사이에서 다리 역할을 수행하는 필터 구현체. 
+
+표준 서블릿 필터를 구현하고 있으며,  할을 위임할 필터체인 프록시(FilterChainProxy)를 내부에 가지고 있다.
+
+## UsernameAuthenticationFilter를 통한 인증 과정
+
+<img src="./images/note//image-20230824010800009.png">
+
+1. 클라이언트로부터 요청을 받으면 서블릿 필터에서 SecurityFilterChain으로 작업이 위임되고, 그 중 UsernamePasswordAuthenticationFilter(위 그림에서 AuthenticationFilter에 해당)에서 인증을 처리합니다.
+2. AuthenticationFilter는 요청 객체(HttpServletRequest)에서 username과 password를 추출해서 토큰을 생성합니다.
+3. 그러고 나서 AuthenticationManager에게 토큰을 전달합니다. AuthenticationManager는 인터페이스이며, 일반적으로 사용되는 구현체는 ProviderManager 입니다.
+4. ProviderManager는 인증을 위해 AuthenticationProvider로 토큰을 전달합니다.
+5. AuthenticationProvider는 토큰의 정보를 UserDetailsService에 전달합니다.
+6. UserDetailsService는 전달받은 정보를 통해 데이터베이스에서 일치하는 사용자를 찾아 UserDetails 객체를 생성합니다.
+7. 생성된 UserDetails 객체는 AuthenticationProvider로 전달되며, 해당 Provider에서 인증을 수행하고 성공하게 되면 ProviderManager로 권한을 담은 토큰을 전달합니다.
+8. ProviderManager는 검증된 토큰을 AuthenticationFilter로 전달합니다.
+9. AuthenticationFilter는 검증된 토큰을 SecurityContextHolder에 있는 Security Context에 저장합니다.
+
+
+
+JWT 토큰을 사용해 인증을 수행할거면 일반적으로 UsernamePasswordAuthenticationFilter 앞에 배치한다 
+
+
+
+# JWT
+
+- **JWT(JSON Web Token):** 당사자 간에 정보를 JSON 형태로 안전하게 전송하기 위한 토큰
+- **형식:** URL에서 사용할 수 있는 문자열로만 구성되어 있음
+- **디지털 서명:** 디지털 서명이 적용되어 있어 신뢰할 수 있음
+- **주된 용도:** 주로 서버와의 통신에서 권한 인가를 위해 사용됨
+- **유연성:** URL에서 사용할 수 있는 문자열로만 구성되어 있어 HTTP 구성요소 어디든 위치할 수 있음
+
+##  JWT 구조
+
+JWT는 점(:)으로 구분된 아래의 세 부분으로 구성
+
+- ﻿﻿헤더(Header)
+- ﻿﻿내용(Payload)
+- ﻿﻿서명(Signature)
+
+![image-20230824011224839](./images/note//image-20230824011224839.png)
+
+### 헤더 (header)
+
+검증과 관련된 내용을 담는다
+
+```json
+{
+	"alg": "HS256",
+	"typ": "JWT"
+}
+```
+
+* alg 속성에서는 해싱 알고리즘을 지정. 해해 알고리즘은 보통 SHA256 또는 RSA를 사용하며, 토큰을 검증할 때 사용되는 서명 부분에서 사용됩니다. 
+*  HS256은 'HMAC SHA256 알고리즘을 사용한다는 의미
+* typ 속성에는 토큰의 타입을 지정.
+
+이렇게 완성된 헤더는 Base6AUrl 형식으로 인코딩돼 사용됩니다.
+
+### 내용 (payload)
+
+JwT의 내용에는 토큰에 담는 정보를 포함합니다. 이곳에 포함된 속성들은 클레임(Claim)이라 하며, 크 게 세 가지로 분류됩니다.
+
+- ﻿﻿등록된 클레임(Registered Claims)
+- ﻿﻿공개 클레임(Public Claims)
+- ﻿﻿비공개 클레임(Private Claims)
+
+이미 이름이 정해져 있는 등록된 클레임 종류들
+
+- **iss:** JWT의 발급자(Issuer) 주체를 나타냅니다. 'iss'의 값은 문자열이나 URL을 포함하는 대소문자를 구분하는 문자열입니다.
+- **sub:** JWT의 제목(Subject)입니다.
+- **aud:** JWT의 수신인(Audience)입니다. JWT를 처리하려는 각 주체는 해당 값으로 자신을 식별해야 합니다. 요청을 처리하는 주체가 'aud' 값으로 자신을 식별하지 않으면 JWT는 거부됩니다.
+- **exp:** JWT의 만료시간(Expiration)입니다. NumericDate 형식으로 표시됩니다.
+- **nbf:** 'Not Before'를 의미합니다. 이 값은 토큰이 활성화되기 전의 시간을 나타냅니다.
+- **iat:** JWT가 발급된 시간(Issued at)입니다.
+- **jti:** JWT의 식별자(JWT ID)입니다. 주로 중복 처리를 방지하기 위해 사용됩니다.
+
+ JWT 내용 예시
+
+```json
+{
+  "sub": "wikibooks payload",
+	"exp": "1602076408",
+	"userid": "wikibooks",
+	"username": "flature"
+}
+```
+
+### 서명 (signature)
+
+JWT의 서명 부분은 인코딩된 헤더, 인코딩된 내용, 비밀키. 헤더의 알고리즘 속성값을 가져와 생성
+
+ 예를 들어, EMAC SHA256 알고리즘을 사용해서 서명을 생성한다면 
+
+```
+HMACSHA256(
+	base64UrlEncode(header) + "." + 
+	base64UrlEncode(payload), 
+	secret
+)
+```
+
+## JWT TokenProvider
+
+```java
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jws;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
+
+@Component
+@RequiredArgsConstructor
+public class JwtTokenProvider {
+
+    private final Logger LOGGER = LoggerFactory.getLogger(JwtTokenProvider.class);
+    private final UserDetailsService userDetailsService; // Spring Security 에서 제공하는 서비스 레이어
+
+    @Value("${springboot.jwt.secret}")
+    private String secretKey = "secretKey";
+    private final long tokenValidMillisecond = 1000L * 60 * 60; // 1시간 토큰 유효
+
+  
+    //SecretKey 에 대해 인코딩 수행
+    @PostConstruct
+    protected void init() {
+        LOGGER.info("[init] JwtTokenProvider 내 secretKey 초기화 시작");
+        secretKey = Base64.getEncoder().encodeToString(secretKey.getBytes(StandardCharsets.UTF_8));
+        LOGGER.info("[init] JwtTokenProvider 내 secretKey 초기화 완료");
+    }
+
+    // JWT 토큰 생성
+    public String createToken(String userUid, List<String> roles) {
+        LOGGER.info("[createToken] 토큰 생성 시작");
+        Claims claims = Jwts.claims().setSubject(userUid);
+        claims.put("roles", roles);
+
+        Date now = new Date();
+      
+        String token = Jwts.builder()
+            .setClaims(claims)
+            .setIssuedAt(now)
+            .setExpiration(new Date(now.getTime() + tokenValidMillisecond))
+            .signWith(SignatureAlgorithm.HS256, secretKey) // 암호화 알고리즘, secret 값 세팅
+            .compact();
+
+        LOGGER.info("[createToken] 토큰 생성 완료");
+        return token;
+    }
+
+    // JWT 토큰으로 인증 정보 조회
+    public Authentication getAuthentication(String token) {
+      
+        UserDetails userDetails = userDetailsService.loadUserByUsername(this.getUsername(token));
+
+        return new UsernamePasswordAuthenticationToken(userDetails, "",
+            userDetails.getAuthorities());
+    }
+
+    // JWT 토큰에서 회원 구별 정보 추출
+    public String getUsername(String token) {
+        LOGGER.info("[getUsername] 토큰 기반 회원 구별 정보 추출");
+        String info = Jwts.parser().setSigningKey(secretKey).parseClaimsJws(token).getBody()
+            .getSubject();
+        LOGGER.info("[getUsername] 토큰 기반 회원 구별 정보 추출 완료, info : {}", info);
+        return info;
+    }
+
+    //HTTP Request Header 에 설정된 토큰 값을 가져옴
+    public String resolveToken(HttpServletRequest request) {
+        return request.getHeader("X-AUTH-TOKEN");
+    }
+
+
+    // JWT 토큰의 유효성 + 만료일 체크
+    public boolean validateToken(String token) {
+        try {
+            Jws<Claims> claims = Jwts.parser().setSigningKey(secretKey).parseClaimsJws(token);
+
+            return !claims.getBody().getExpiration().before(new Date());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+}
+```
+
+application.yml
+
+```yaml
+springboot:
+	jwt:
+		secret: flature!@#
+```
+
