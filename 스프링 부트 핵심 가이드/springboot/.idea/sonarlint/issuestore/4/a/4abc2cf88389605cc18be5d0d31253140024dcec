@@ -1,0 +1,17 @@
+
+^
+java:S1192""HDefine a constant instead of duplicating this literal "Flature" 4 times.(Œ£Š¦
+l
+java:S1192"QDefine a constant instead of duplicating this literal "/api/v1/crud-api" 3 times.(ÀË¡£úÿÿÿÿ
+l
+java:S1192"VDefine a constant instead of duplicating this literal "http://localhost:9090" 6 times.(‡„©Ú
+b
+java:S2259+"LA "NullPointerException" could be thrown; "responseEntity" is nullable here.(ãëô
+^
+java:S1854%"CRemove this useless assignment to local variable "responseEntity1".(èÿ®Æÿÿÿÿÿ
+O
+java:S1481%"4Remove this unused "responseEntity1" local variable.(èÿ®Æÿÿÿÿÿ
+T
+java:S1854n"9Remove this useless assignment to local variable "clone".(èğäºüÿÿÿÿ
+E
+java:S1481n"*Remove this unused "clone" local variable.(èğäºüÿÿÿÿ
