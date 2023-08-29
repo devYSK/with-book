@@ -38,7 +38,7 @@
 
 ##  다중 마스터 복제(multi-master replication)
 
-<img src="./images/7장 분산 시스템을 위한 유일 ID 생성기 설계//image-20230827223357307.png" width = 600 height = 300>
+<img src="images/7장 분산 시스템을 위한 유일 ID 생성기 설계//image-20230827223357307.png" width = 600 height = 300>
 
 * DB의 auto increment 기능을 활용하여 다음 ID를 구할 때 1만큼 증가시키지 않고 k 만큼 증가시킨다.
   * k는 사용중인 데이터베이스 서버의 수다
@@ -243,3 +243,8 @@ ULID (Universally Unique Lexicographically Sortable Identifier)의 구조는 크
 ULID는 Crockford의 base32 인코딩을 사용하여 표현된다. 
 
 이로 인해 각 ULID 값은 26개의 소문자, 6개의 숫자 (0-9의 숫자 중 1, 8, 9를 제외) 그리고 몇몇 특수 문자로 구성되는 26자리의 문자열로 나타낼 수 있다.
+
+
+
+
+
