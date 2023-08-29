@@ -38,7 +38,7 @@
 
 ##  다중 마스터 복제(multi-master replication)
 
-<img src="./images/7장 분산 시스템을 위한 유일 ID 생성기 설계//image-20230827223357307.png?raw=true" width = 600 height = 300>
+<img src="./images/7장 분산 시스템을 위한 유일 ID 생성기 설계/image-20230827223357307.png" width = 600 height = 300>
 
 * DB의 auto increment 기능을 활용하여 다음 ID를 구할 때 1만큼 증가시키지 않고 k 만큼 증가시킨다.
   * k는 사용중인 데이터베이스 서버의 수다
