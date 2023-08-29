@@ -71,11 +71,11 @@ URL 단축기는 기본적으로 두 개의 엔드포인트를 필요로 한다.
 
 다음의 그림은 브라우저에 단축 URL을 입력하면 무슨 일이 생기는지 보여준다.
 
-<img src="./images/8장 URL 단축키 설계//image-20230827230546204.png">
+<img src="./images/image-20230827230546204.png">
 
 단축 URL을 받은 서버는 그 URL을 원래 URL로 바꾸어서 301 응답의 Location 헤더에 넣어 반환한다.
 
-<img src="./images/8장 URL 단축키 설계//image-20230827230627030.png" width = 700 height = 600>
+<img src="./images/image-20230827230627030.png" width = 700 height = 600>
 
 ## 301 응답 VS 302 응답
 
@@ -152,7 +152,7 @@ public class UrlController {
 
 결국 중요한 것은 긴 URL을 이 해시 값으로 대응시킬 해시 함수 fx를 찾는 일이 될 것이다.
 
-<img src="./images/8장 URL 단축키 설계//image-20230827231339393.png" width = 500 height = 350>
+<img src="./images/image-20230827231339393.png" width = 500 height = 350>
 
 이 해시 함수는 다음 요구 사항을 만족해야 한다.
 
@@ -248,7 +248,7 @@ n = 7 이면 3.5조 개의 URL을 만들 수 있다. 그러면 3650억개를 만
 
 충돌이 실제로 발생했을 때는, 충돌이 해소될 때까지 사전에 정한 문자열을 해시값에 덧붙인다.
 
-<img src="./images/8장 URL 단축키 설계//image-20230827234423875.png" width = 800 height = 500>
+<img src="./images/image-20230827234423875.png" width = 800 height = 500>
 
 이 방법을 쓰면 충돌은 해소할 수 있지만 단축 URL을 생성할 때 한 번 이상 데이터베이스 질의를 해야하므로 오버헤드가 크다.
 
@@ -258,7 +258,7 @@ n = 7 이면 3.5조 개의 URL을 만들 수 있다. 그러면 3650억개를 만
 
 블룸 필터(Bloom Filter)는 데이터 구조 중 하나로, 집합 내에 원소가 존재하는지 여부를 효율적으로 확인할 수 있는 확률적 데이터 구조
 
-<img src="./images/8장 URL 단축키 설계//image-20230827234646870.png">
+<img src="./images/image-20230827234646870.png">
 
 * https://ko.wikipedia.org/wiki/%EB%B8%94%EB%A3%B8_%ED%95%84%ED%84%B0
 
@@ -362,7 +362,7 @@ public class BloomFilter {
 - 11157₁₀ = 2 x 622 + 55 X 621 + 59 x 620 = [2, 55, 59] => [2, T, X] => 2TX62 이다.
 - 따라서 단축 URL은 https://tinyurl.com/2TX가 된다.
 
-<img src="./images/8장 URL 단축키 설계//image-20230827235248504.png">
+<img src="./images/image-20230827235248504.png">
 
 변환 절차는 다음과 같습니다:
 
@@ -442,7 +442,7 @@ URL 단축기는 시스템의 핵심 컴포넌트이므로, 그 처리 흐름이
 
 * 본 예제에서는 62진법 변환 기법을 사용해 설계할 것이다
 
-<img src="./images/8장 URL 단축키 설계//image-20230828000620963.png" width = 700 height = 600>
+<img src="./images/image-20230828000620963.png" width = 700 height = 600>
 
 1. ﻿﻿﻿입력으로 긴 URL을 받는다.
 2. ﻿﻿﻿데이터베이스에 해당 URL이 있는지 검사한다.
@@ -477,7 +477,7 @@ URL 리디렉션(recirection) 메커니즘의 상세한 설계를 그리고 있�
 
 쓰기보다 읽기를 더 자주 하는 시스템이라, `<단축 URL, 원래 URL>`의 쌍을 캐시에 저장하여 성능을 높였다.
 
-<img src="./images/8장 URL 단축키 설계//image-20230828000928213.png">
+<img src="./images/image-20230828000928213.png">
 
 로드밸런서의 동작 흐름은 다음과 같이 요약할 수 있다.
 
