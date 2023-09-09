@@ -48,33 +48,33 @@ public class AdvancedSystemCommandJob {
 //				.build();
 //	}
 //
-//	@Bean
-//	public SystemCommandTasklet systemCommandTasklet() {
-//		SystemCommandTasklet tasklet = new SystemCommandTasklet();
+// 	@Bean
+// 	public SystemCommandTasklet systemCommandTasklet() {
+// 		SystemCommandTasklet tasklet = new SystemCommandTasklet();
 //
-//		tasklet.setCommand("touch tmp.txt");
-//		tasklet.setTimeout(5000);
-//		tasklet.setInterruptOnCancel(true);
+// 		tasklet.setCommand("touch tmp.txt");
+// 		tasklet.setTimeout(5000);
+// 		tasklet.setInterruptOnCancel(true);
 //
-//		// Change this directory to something appropriate for your environment
-//		tasklet.setWorkingDirectory("/Users/mminella/spring-batch");
+// 		// Change this directory to something appropriate for your environment
+// 		tasklet.setWorkingDirectory("/Users/mminella/spring-batch");
 //
-//		tasklet.setSystemProcessExitCodeMapper(touchCodeMapper());
-//		tasklet.setTerminationCheckInterval(5000);
-//		tasklet.setTaskExecutor(new SimpleAsyncTaskExecutor());
-//		tasklet.setEnvironmentParams(new String[] {
-//				"JAVA_HOME=/java",
-//				"BATCH_HOME=/Users/batch"});
+// 		tasklet.setSystemProcessExitCodeMapper(touchCodeMapper());
+// 		tasklet.setTerminationCheckInterval(5000);
+// 		tasklet.setTaskExecutor(new SimpleAsyncTaskExecutor());
+// 		tasklet.setEnvironmentParams(new String[] {
+// 				"JAVA_HOME=/java",
+// 				"BATCH_HOME=/Users/batch"});
 //
-//		return tasklet;
-//	}
+// 		return tasklet;
+// 	}
 //
-//	@Bean
-//	public SimpleSystemProcessExitCodeMapper touchCodeMapper() {
-//		return new SimpleSystemProcessExitCodeMapper();
-//	}
+// 	@Bean
+// 	public SimpleSystemProcessExitCodeMapper touchCodeMapper() {
+// 		return new SimpleSystemProcessExitCodeMapper();
+// 	}
 //
-//	public static void main(String[] args) {
-//		SpringApplication.run(AdvancedSystemCommandJob.class, args);
-//	}
+// 	public static void main(String[] args) {
+// 		SpringApplication.run(AdvancedSystemCommandJob.class, args);
+// 	}
 }
