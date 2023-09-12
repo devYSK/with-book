@@ -1,0 +1,25 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/function_example
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver
+
+
+  jpa:
+    hibernate:
+      ddl-auto: update # 'update'는 개발 환경에서 편리하지만, 실제 환경에서는 'validate'나 'none'을 추천합니다.
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+#        hbm2ddl:
+#          import_files_sql_extractor: org.hibernate.tool.schema.internal.script.MultiLineSqlScriptExtractor
+  sql:
+    init:
+      separator: ;;
+
+
+# 추가적으로 필요한 설정들
+
