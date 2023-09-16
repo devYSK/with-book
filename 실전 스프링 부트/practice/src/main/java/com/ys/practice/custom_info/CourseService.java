@@ -3,7 +3,8 @@ package com.ys.practice.custom_info;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import com.ys.practice.fail.Course;
+import com.ys.practice.register_user.Course;
+import com.ys.practice.register_user.repository.CourseRepository;
 
 @Service
 public class CourseService {

@@ -1,69 +1,48 @@
 package com.ys.practice;
 
-import java.util.Set;
-
-import javax.validation.ConstraintViolation;
-import javax.validation.Validation;
-import javax.validation.Validator;
-
-import org.springframework.boot.CommandLineRunner;
+import org.apache.catalina.Context;
+import org.apache.catalina.connector.Connector;
+import org.apache.tomcat.util.descriptor.web.SecurityCollection;
+import org.apache.tomcat.util.descriptor.web.SecurityConstraint;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-
-import com.ys.practice.passay.Password;
+import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory;
+import org.springframework.boot.web.servlet.server.ServletWebServerFactory;
+import org.springframework.context.annotation.Bean;
 
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @SpringBootApplication
-public class PracticeApplication implements CommandLineRunner {
+public class PracticeApplication {
 
 	public static void main(String[] args) {
 		SpringApplication.run(PracticeApplication.class, args);
 	}
 
-	@Override
-	public void run(String... args) throws Exception {
-
-		final var user = new User("test", "test");
-
-		Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
-
-		Set<ConstraintViolation<User>> violations = validator.validate(user);
-		log.error("user1의 비밀번호가 비밀번호 정책을 준수하지 않습니다.");
-		violations.forEach(constraintViolation -> log.error("Violation details: [{}].", constraintViolation.getMessage()));
-
+	@Bean
+	public ServletWebServerFactory servletContainer() {
+		TomcatServletWebServerFactory tomcat = new TomcatServletWebServerFactory() {
+			@Override
+			protected void postProcessContext(Context context) {
+				SecurityConstraint securityConstraint = new SecurityConstraint();
+				securityConstraint.setUserConstraint("CONFIDENTIAL");
+				SecurityCollection collection = new SecurityCollection();
+				collection.addPattern("/*");
+				securityConstraint.addCollection(collection);
+				context.addConstraint(securityConstraint);
+			}
+		};
+		tomcat.addAdditionalTomcatConnectors(redirectConnector());
+		return tomcat;
 	}
 
-
-	public static class User {
-
-		private String userName;
-
-		@Password
-		private String password;
-
-		public User(String userName, String password) {
-			this.userName = userName;
-			this.password = password;
-		}
-
-		public String getUserName() {
-			return userName;
-		}
-
-		public String getPassword() {
-			return password;
-		}
-
-		@Override
-		public String toString() {
-			return "User{" +
-				"userName='" + userName + '\'' +
-				", password='" + password + '\'' +
-				'}';
-		}
-
+	private Connector redirectConnector() {
+		Connector connector = new Connector("org.apache.coyote.http11.Http11NioProtocol");
+		connector.setScheme("http");
+		connector.setPort(8080);
+		connector.setRedirectPort(8443);
+		return connector;
 	}
 
 }

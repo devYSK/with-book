@@ -892,9 +892,677 @@ management:
 - ﻿﻿인메모리, JDBC, LDAP 환경에서 스프링 시큐리티 커스터마이징
 - ﻿﻿스프링 부트 프로젝트에 HTTP 기본 인증 적용
 
+## CSRF 방어
 
+<img src="./images//image-20230917000803108.png">
+
+```http
+// spring security의 기본 http 응답 헤더 
+Cache-Control: no-cache, no-store, max-age=O, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Content-Type-Options: nosniff
+Strict-Transport-Security: max-age=31536000 ; includeSubDomains
+X-Frame-Options: DENY
+X-XSS-Protection: 1; mode=block
+```
+
+- ﻿﻿Cache-Control - 브라우저 캐시를 완전하게 비활성화
+- ﻿﻿X-Content-Type-Options - 브라우저의 콘텐트 타입 추측을 비활성화하고 Content-Type 헤더로 지정된 콘텐트 타입으로만 사용하도록 강제
+- ﻿﻿Strict-Transport-Security - 응답 헤더에 포함되면 이후 해당 도메인에 대해서는 브라우저 가 자동으로 HTTPS를 통해 연결하도록 강제하는 HSTS(HTTP Strict Transport securty) 활성화 (http://mng.bzl/jyEa)
+- ﻿﻿X-Frame-Options - 값을 DENY로 설정하면 웹 페이지 콘텐트가 frame, iframe, embed에서 표시 되지 않도록 강제해서 클릭재킹공격 방지
+- ﻿﻿X-XSS-Protection - 값을 1; mode=block으로 설정하면 브라우저의 XSScross site scripting 필터 링을 활성화하고 XSS 공격이 감지되면 해당 웹 페이지를 로딩하지 않도록 강제
+
+이 외에도 보안을 높일 수 있는 여러 가지 HTTP 응답 헤더 관련 내용을 스프링 시큐리티 공식 문
+
+서(https://mng.bz/W74g)에서 확인할 수 있다.
+
+* https://docs.spring.io/spring-security/site/docs/5.0.x/reference/html/headers.html
+
+### Spring Seucirty 자동 구성 클래스
+
+스프링 부트는 SecurityAutoConfiguration, UserDetailsServiceAutoConfiguration, SecurityFilterAutoConfiguration 이렇게 세 개의 설정 클래스를 사용한다.
+
+## 시큐리티 LDAP 기반 인증
+
+LDAP (Lightweight Directory Access Protocol) 기반 인증은 LDAP 서버를 사용하여 사용자의 자격 증명을 검증하고 인증하는 방법입니다. LDAP는 디렉터리 서비스를 검색하고 수정하는 데 사용되는 프로토콜로, 일반적으로 사용자, 그룹, 기타 객체 정보를 저장하고 구성하는 데 사용됩니다
+
+스프링 부트 애플리케이션에 LDAP 기능을 추가하려면 spring-ldap-core와 spring-security-Idap가 필요하다. LDAP 서버도 필요한데 간단한 내장형 LDAP 서버인 UnboundiD (https://ldap.com/unboundid-ldap-sdk-for-java/)를 사용한다.
+
+```groovy
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.springframework.ldap:spring-ldap-core'
+    implementation 'org.springframework.security:spring-security-ldap'
+    implementation 'com.unboundid:unboundid-ldapsdk'
+}
+```
+
+사용자 정보는 LDIF(https://ldap.com/ldif-the-ldap-data-interchange-format/) 파일에 저장되므로
+
+/src/main/resources/users.ldif 파일에 저장한다.
+
+```
+dn: dc=manning,dc=com // 1
+objectclass: top
+objectclass: domain
+objectclass: extensibleObject
+dc: manning
+
+dn: ou=people,dc=manning,dc=com
+objectclass: top
+objectclass: organizationalUnit
+ou: people
+
+dn: uid=steve,ou=people,dc=manning,dc=com // 2
+objectclass: top
+objectclass: person
+objectclass: organizationalPerson
+objectclass: inetOrgPerson
+cn: Steve Smith
+sn: Smith
+uid: steve
+userPassword: password
+
+dn: uid=jsocket,ou=people,dc=manning,dc=com // 3
+objectclass: top
+objectclass: person
+objectclass: organizationalPerson
+objectclass: inetOrgPerson
+cn: John Socket
+sn: Socket
+uid: jsocket
+userPassword: password
+```
+
+1. DN(distinguished name) 정의
+
+2.  Steve Smith 계정 정의
+
+3.  John Socket 계정 정의
+
+<img src="./images//image-20230917002648895.png">
+
+이제 LDAP 서버가 기동하도록 application,yml에 LDAP 서버 설정을 추 가하자.
+
+```yaml
+spring:
+  ldap:
+    embedded:
+      # ① 내장 LDAP 서버 포트
+      port: 8389
+      # ② 내장 LDIF 파일 위치
+      ldif: classpath:users.ldif
+      # ③ 내장 LDAP 서버 고유 이름
+      base-dn: dc=manning,dc=com
+```
+
+security 설정
+
+```java
+@Configuration
+public class SecurityConfiguration extends WebSecurityConfigurerAdapter {
+
+    @Override
+    protected void configure(HttpSecurity http) throws Exception {
+        http
+                .authorizeRequests()
+                .antMatchers("/login").permitAll()
+                .anyRequest().authenticated()
+                .and()
+                .formLogin().loginPage("/login");
+    }
+
+    @Override
+    protected void configure(AuthenticationManagerBuilder auth) throws Exception {
+        auth
+                .ldapAuthentication()
+                .userDnPatterns("uid={0},ou=people")
+                .contextSource()
+                .url("ldap://localhost:8389/dc=manning,dc=com")
+                .and()
+                .passwordCompare()
+                .passwordEncoder(NoOpPasswordEncoder.getInstance()) // NoOp은 deprecated
+                .passwordAttribute("userPassword");
+    }
+
+    @Override
+    public void configure(WebSecurity web) throws Exception {
+        web
+                .ignoring()
+                .antMatchers("/webjars/**", "/images/*", "/css/*", "/h2-console/**");
+    }
+}
+```
+
+인메모리 인증이나 JDBC 인증에서는 UserDetailsService가 중요한 역할을 담당했던 반면에 LDAP 인증에서는 UserDetailsservice를 사용할 수 없다.
+
+왜냐하면 LDAP 인증에서는 
+
+* LDAP으로 부터 비밀번호를 읽어올 수 없고,
+*  LDAP에 비밀번호를 제공하고 
+* LDAP이 실제 비밀번호 일치 여부 확인을 담당하기 때문이다. 
+
+스프링 시큐리티는 LdapAuthenticator 인터페이스를 제공하며 이를 통해 LDAP 인증이 처리된다.
+
+스프링 시큐리티에서는 2가지 방식으로 LDAP 인증을 수행할 수 있다.
+
+1. 예제에 사용된 인증 방식인데, 사용자가 입력한 비밀번호와 LDAP 서버에 저장된 비밀번호를 LDAP 서버가 Compare 연산을 사용해서 비교하고 결과를 스프링 시큐리티에게 반환한다. 
+
+2. bind 인증. 사용자가 입력한 비밀번호와 같은 식별 정보(identity proor)를 LDAP 서버가 Bind 연산(https://ldap.com/the-ldap-bind-operation/)을 사용해서 인증을 처리한다.
 
 # CHAPTER 6 스프링 시큐리티 응용
+
+- ﻿﻿스프링 클라우드 볼트(Spring Cloud Vault)를 이용한 비밀 정보 관리, Remember Me, 구글 리캡차(Google reCAPCHA) 사용을 위한 스프링 시큐리티 설정 이메일 확인과 구글 오센티케이터 Google Authenticator를 활용한 다단계 인증
+- ﻿﻿스프링 시큐리티 운영과 관련된 스프링 부트 액추에이터 엔드포인트
+
+* HTTPS 활성화
+* 비밀번호 관리
+* 계정 잠금 
+* 리캡차
+* 2단계 인증
+* 구아로~
+
+## Spring Boot HTTPS 활성화
+
+스프링 부트 애플리케이션에서 HTTPS를 활성화하는 작업은 2단계로 구성된다. 먼저 TLS 인증서 를 확보해야 하고, 이 인증서를 스프링 부트 애플리케이션에 설정한다.
+
+* JDK keytool 자가승인 인증서 : https://github.com/spring-boot-in-practice/repo/wiki/Generating-a-Self-Signed-Certificate-Using-Keytool
+
+https 활성화 
+
+* 인증서를 생성하면 스프링 부트 애플리케이션에 HTTPS 설정을 할 수 있다. 먼저 인증서를 포함하 고 있는keystore 파일을 스프링 부트가 인식할 수 있도록 src/main/resources/keystore 폴더에 저장한다. 
+* 그리고 이 파일을 스프링 시큐리티에서 지정해주고 HTTPS를 활성화하면 된다.
+
+```yaml
+server:
+  ssl:
+    key-store-type: PKCS12  # 키 저장소에 사용된 형식. JKS 파일인 경우 JKS로 설정될 수 있습니다.
+    key-store: classpath:keystore/sbip.p12 # 인증서가 포함된 키 저장소의 경로
+    key-store-password: p@ssw0rd     # 인증서 생성에 사용된 비밀번호
+    key-alias: sbip     # 인증서에 매핑된 별칭
+  # HTTPS 포트
+  port: 8443
+
+```
+
+
+
+```java
+@Configuration
+@EnableWebSecurity
+public class SecurityConfiguration {
+
+	@Bean
+	public UserDetailsService userDetailsService() {
+
+		UserDetails peter = User.builder()
+								.username("user")
+								.password(passwordEncoder().encode("pass"))
+								.roles("USER")
+								.build();
+
+		return new InMemoryUserDetailsManager(peter);
+	}
+
+	@Bean
+	public SecurityFilterChain httpSecurity(HttpSecurity http) throws Exception {
+		http.requiresChannel()
+			.anyRequest()
+			.requiresSecure() // 강제로 모든 요청에 https 리다이렉트 
+			.and()
+			.authorizeRequests()
+			.antMatchers("/login")
+			.permitAll()
+			.anyRequest()
+			.authenticated()
+			.and()
+			.formLogin()
+			.loginPage("/login");
+
+		return http.build();
+	}
+
+	@Bean
+	public WebSecurityCustomizer webSecurityCustomizer() {
+		// antMatchers 부분도 deprecated 되어 requestMatchers로 대체
+		return (web) -> web.ignoring()
+						   .antMatchers("/webjars/**", "/images/*", "/css/*", "/h2-console/**");
+	}
+
+	@Bean
+	public PasswordEncoder passwordEncoder() {
+		return new BCryptPasswordEncoder();
+	}
+}
+```
+
+다음과 같이도 설정 가능하다
+
+```java
+@Slf4j
+@SpringBootApplication
+public class PracticeApplication {
+
+	public static void main(String[] args) {
+		SpringApplication.run(PracticeApplication.class, args);
+	}
+
+	@Bean
+	public ServletWebServerFactory servletContainer() {
+		TomcatServletWebServerFactory tomcat = new TomcatServletWebServerFactory() {
+			@Override
+			protected void postProcessContext(Context context) {
+				SecurityConstraint securityConstraint = new SecurityConstraint();
+				securityConstraint.setUserConstraint("CONFIDENTIAL");
+				SecurityCollection collection = new SecurityCollection();
+				collection.addPattern("/*");
+				securityConstraint.addCollection(collection);
+				context.addConstraint(securityConstraint);
+			}
+		};
+		tomcat.addAdditionalTomcatConnectors(redirectConnector());
+		return tomcat;
+	}
+
+	private Connector redirectConnector() {
+		Connector connector = new Connector("org.apache.coyote.http11.Http11NioProtocol");
+		connector.setScheme("http");
+		connector.setPort(8080);
+		connector.setRedirectPort(8443);
+		return connector;
+	}
+
+}
+
+```
+
+
+
+## Spring Cloud Vault 비밀번호 관리
+
+* https://www.vaultproject.io/
+
+yml에 들어가는 민감정보를 관리할 수 있다. 
+
+API 을 사용하여 *민감정보*를 관리하는 시스템.
+
+프로젝트 내에 *보안적인 요소를 고려해야 하는 값(계정 및 패스워드 = 민감정보 등)*들을 HTTP API 통신을 이용하여 외부(=git 저장소 등)에 노출시키지 않은 상태로 사용할 수 있기 때문에 보안에 효율적임.
+
+* https://cloud.spring.io/spring-cloud-vault/reference/html/
+
+https://github.com/spring-boot-in-practice/repo/wiki/Installing-and-Configuring-HashiCorp-Vault
+
+1. ﻿﻿﻿https://www.vaultproject.io/downloads에서 운영체제에 맞게 설치 파일을 다운로드한다. 책에서는 맥 OS를 기준으로 진행한다.
+
+```sh
+ brew install hashicorp/tap/vault
+
+//
+> which vault
+/opt/homebrew/bin/vault
+
+cd /opt/homebrew/bin
+
+vi vault.conf
+```
+
+2. ﻿﻿﻿ZIP 파일 압축을 풀면 vault 실행 파일이 나온다.
+
+
+
+3. ﻿﻿﻿vault 실행 파일이 있는 폴더와 같은 폴더에 다음과 같이 vault.conf 파일을 작성한다.
+
+```text
+ backend "inmem" {
+ 
+ }
+ 
+ listener "tcp" {
+	 address = "0.0.0.0:8200"
+ 	 tls_disable = 1
+ }
+ disable_mlock = true
+```
+
+
+
+4. 다른 터미널 창을 열고 환경 변수를 지정한다. 
+
+```yaml
+export VAULT_ADDR=http://localhost:8200
+```
+
+5. 볼트는 기본적으로 사용할 수 없도록 봉인sealed돼 있다. 봉인을 해제하려면 비밀 키가 필요하며 다음 명령을 통해 비밀 키를 생성할 수 있다.
+
+```sh
+# 볼트 서버 시작
+vault server -config=./vault.conf
+
+# 시작 후 다른 터미널에서 실행한다. 
+./vault opertator init // vault 디렉토리 내에서 
+
+# 만약 Get "https://127.0.0.1:8200/v1/sys/internal/ui/mounts/secret/application/db": http: server gave HTTP response to HTTPS client 이러한 에러가 발생하였을 경우
+$ export VAULT_ADDR='http://localhost:8200'
+
+# 다르므로 이용하지 말자 생성한거 쓰자
+./vault operator init
+Unseal Key 1: Bx9LSQkYmvISCmDdWgDA3aiAHk/9g9LK+KJNPmKCMB
+Unseal Key 2: JM2taLcylV8LMsUFm5camxNHHeCVpxnJL1/aIj9+q/l
+Unseal Key 3: gYNsPSCphaZKpGijwAtcK6zjIsB5W+AlmRdE8bwE95P
+Unseal Key 4: mvo8Km2jIv9r6UCHSaHOZdhxS8kOvGs9GuIyGuacgGc
+Unseal Key 5: KvSPa/6qDaTnaHiKr9GGnOJEKYq3Q6mBOLHZ7vEim/T
+
+Initial Root Token: hvs.eqRn7Jhz8WhStBUOfCdNb2P
+
+```
+
+6.  vault status 명령을 실행하면 볼트가 봉인돼 있고 봉인을 해제하려면 적어도 3개의 비밀 키가 필요한 것을 확인할 수 있다.
+
+```sh
+./vault status
+```
+
+7. 확인한 비밀키 3개를 이용해서 봉인 해제 
+
+```shell
+# 위 5개중 하나
+./vault operator unseal Bx9LSQkYmvISCmDdWgDA3aiAk/9g9LK+KJNPmKCMBf5
+./vault operator unseal JM2taLcylV8LMsUFm5camxNHHeCVpxJL1/aIjy9+q/l
+./vault operator unseal gYNsPSCphaZKpGijwAtcK6zjIsB5W+AlmRE8bwjE95P
+
+```
+
+8. 5번에서 확인한 초기 루트 토큰(inital Root token) ㅎ환경변수 등록
+
+```shell
+export VAULT_TOKEN=hvs.eqRn7Jhz8WhStBUOfCdNb2I
+```
+
+9. kv 비밀정보 엔진 활성화
+
+```shell
+./vault secrets enable -path=secret kv
+Success! Enabled the kv secrets engine at: secret/
+```
+
+10. keystored의 비밀정보를 볼트에 저장
+
+```sh
+./vault write secret/coursetracker keystore=p@ssw0rd # yaml 비밀번호 
+```
+
+```yaml
+server:
+  ssl:
+    # 키 저장소에 사용된 형식. JKS 파일인 경우 JKS로 설정될 수 있습니다.
+    key-store-type: PKCS12
+    # 인증서가 포함된 키 저장소의 경로
+    key-store: classpath:keystore/sbip.p12
+    # 인증서 생성에 사용된 비밀번호
+    key-store-password: p@ssw0rd # 이 비밀번호
+    # 인증서에 매핑된 별칭
+    key-alias: sbip
+  # HTTPS 포트
+  port: 8443
+```
+
+의존관계 추가 
+
+```groovy
+plugins {
+    id 'io.spring.dependency-management' version '1.0.15.RELEASE'
+}
+ext {
+    set('springCloudVersion', "2021.0.3") // 버전 잘 확인해서 쓸것
+}
+
+dependencies {
+  implementation 'org.springframework.cloud:spring-cloud-starter-vault-config'
+}
+
+dependencyManagement {
+    imports {
+        mavenBom("org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}")
+    }
+}
+// https://mvnrepository.com/artifact/org.springframework.cloud/spring-cloud-dependencies
+버전 호
+```
+
+application.yaml에 추가
+
+```yaml
+spring:
+  cloud:
+    vault:
+      token: hvs.eqRn7Jhz8WhStBUOfCdNb2IP
+      authentication: token
+      host: localhost
+      port: 8200
+      scheme: http
+  config:
+    import: vault://
+  application:
+      name: coursetracker
+```
+
+1. 볼트 초기 설정 시 획득한 초기 루트 토큰값을 지정한다. CourseTracker 애플리케이션은 이 값 을 볼트에 제공해서 인증을 통과한다.
+
+2. 볼트 인증 방식을 token으로 지정한다. 볼트는 token 외에 다른 인증 방법도 지원한다.
+
+3. ﻿﻿볼트 서버의 위치를 지정한다. 예제라서 HTTP 프로토콜을 사용하지만 실제 서비스에서는 반드 시 HTTPS를 사용해야 한다.
+
+4. ﻿﻿비밀 정보가 담겨 있는 볼트의 위치를 볼트에서 설정한 위치인 secret/coursetracker로 지정
+    한다.
+
+5. 인증서 비밀번호를 ${keystore}로 대체한다.
+
+ 
+
+접속시 정상 동작 
+
+* https://mungmange.tistory.com/135
+
+* https://sg-choi.tistory.com/624
+
+
+
+## 메일 인증 예
+
+```groovy
+implementation 'org.springframework.boot:spring-boot-starter-mail'
+```
+
+yaml
+
+```yaml
+spring:
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username:
+    password:
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+    protocol: smtp
+    test-connection: false
+
+```
+
+* https://support.google.com/mail/answer/185833
+* https://myaccount.google.com/apppasswords?pli=1&rapt=AEjHL4NOjB81mnyAKUh1OiAK4MNuRQpqOE74-nTLSjXw-7JgbqFA2AGOkiPNf1QsncH1cYAdJQS0_8p6iMWeY1htAWagBNorqA
+
+- Google 계정 관리 > 보안 > Google에 로그인 > 2단계 인증 설정
+- Google 계정 관리 > 보안 > Google에 로그인 > 앱 비밀번호 설정
+  - 앱 선택 > 기타 > SMTP로 설정 후 생성
+  - 생성한 비밀번호를 복사
+
+## 로그인 시도 횟수 제한
+
+애플리케이션 로그인을 3회 실패하면 24시간 동안 로그인을 허용하지 않도록 제한해야 한다.
+
+
+
+스프링 시큐리티는 여러 가지 보안 활동을 수행하면서 다양한 스프링 이벤트를 발행한다. 
+
+로그인에 성공하면 스프링 시큐리티는 AuthenticationsuccessEvent를 발행하고, 
+
+입력한 정보 가 올바르지 않아 로그인에 실패하면 AuthenticationFailureBadcredentialsEvent를 발행한다.
+
+이외에도 상황에 따라 여러 가지 이벤트가 발행된다.
+
+- ﻿﻿실패한 로그인 횟수를 저장할 캐시cache 정의
+- ﻿﻿스프링 시큐리티 이벤트를 활용해서 사용자 상태를 캐시에 저장
+- ﻿﻿캐시에 저장된 로그인 실패 횟수가 3회 이상이면 로그인 불허
+- ﻿﻿캐시는 24시간 후 자동 만료
+
+guava 캐시, 레디스 사용
+
+
+
+## 리캡차 구현
+
+1. 구글에 로그인 후 구글 리캡차 어드민 페이지(https://www.google.com/recaptcha/admin/create)에 접속해 서 그림과 같이 설정 후 [Submit)을 클릭한다. 이렇게 하면 리캡차 컴포넌트에 있는 체크박스를 체크해야 봇이 아닌 사용자로 인식한다.
+
+![image-20230917031619964](./images//image-20230917031619964.png)
+
+2. [Submit) 클릭 후 표시되는 화면에서 사이트 키Site Key와 시크릿 키secret Key가 표시된다. 이 키값을html에 추가한다.
+
+```html
+<div class="g-recaptcha mb-2" data-sitekey="구글 사이트 키"></div>
+```
+
+3. 스크립트도 추가해야 한다
+
+```js
+<script src="https://www.google.com/recaptcha/api.js"></script>
+```
+
+이제 사용자로부터 입력받은 리캡차값을 검증하는 로직 구현이 필요하다.
+
+```java
+@Controller
+public class RegistrationController {
+
+   private final GoogleRecaptchaService captchaService;
+ 
+    @Value("${app.email.verification:N}")
+    private String emailVerification;
+
+    @PostMapping("/adduser")
+    public String register(@Valid @ModelAttribute("user") UserDto userDto, HttpServletRequest httpServletRequest, BindingResult result) {
+        if(result.hasErrors()) {
+            return "add-user";
+        }
+        String response = httpServletRequest.getParameter("g-recaptcha-response");
+        if(response == null) {
+            return "add-user";
+        }
+        String ip = httpServletRequest.getRemoteAddr();
+        RecaptchaDto recaptchaDto = captchaService.verify(ip, response);
+        if(!recaptchaDto.isSuccess()) {
+            return "redirect:adduser?incorrectCaptcha";
+        }
+
+        ApplicationUser applicationUser = userService.createUser(userDto);
+        if("Y".equalsIgnoreCase(emailVerification)) {
+            eventPublisher.publishEvent(new UserRegistrationEvent(applicationUser));
+            return "redirect:adduser?validate";
+        }
+        return "redirect:adduser?success";
+
+    }
+
+}
+
+// dto
+
+public class RecaptchaDto {
+
+	private boolean success;
+	private List<String> errors;
+
+	public boolean isSuccess() {
+		return success;
+	}
+
+	public void setSuccess(boolean success) {
+		this.success = success;
+	}
+
+	public List<String> getErrors() {
+		return errors;
+	}
+
+	public void setErrors(List<String> errors) {
+		this.errors = errors;
+	}
+}
+
+// service
+
+@Service
+public class GoogleRecaptchaService {
+
+	private static final String VERIFY_URL = "https://www.google.com/recaptcha/api/siteverify";
+
+	private final WebClient webClient;
+	private final String secretKey;
+
+	public GoogleRecaptchaService(@Value("${captcha.secret.key}") String secretKey,
+		WebClient.Builder webClientBuilder) {
+		this.secretKey = secretKey;
+		this.webClient = webClientBuilder.baseUrl(VERIFY_URL)
+										 .build();
+	}
+
+	public RecaptchaDto verify(String ip, String recaptchaResponse) {
+		Map<String, String> params = new HashMap<>();
+		params.put("remoteip", ip);
+		params.put("secret", secretKey);
+		params.put("response", recaptchaResponse);
+
+		Map<String, Object> body = webClient.get()
+											.uri(uriBuilder -> uriBuilder
+												.queryParam("remoteip", "{remoteip}")
+												.queryParam("secret", "{secret}")
+												.queryParam("response", "{response}")
+												.build(params))
+											.retrieve()
+											.bodyToMono(Map.class)
+											.block();
+
+		if (body == null) {
+			throw new RuntimeException("Recaptcha verification failed!");
+		}
+
+		boolean success = (Boolean)body.get("success");
+		RecaptchaDto recaptchaDto = new RecaptchaDto();
+		recaptchaDto.setSuccess(success);
+
+		if (!success) {
+			recaptchaDto.setErrors((List<String>)body.get("error-codes"));
+		}
+
+		return recaptchaDto;
+	}
+}
+```
+
+
+
+```yaml
+captcha:
+  secret:
+    key: ${GOOGLE_SECRET}
+```
+
+## 구글 multi-factor authentication
 
 
 

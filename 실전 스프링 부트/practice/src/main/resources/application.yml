@@ -1,4 +1,58 @@
+
+captcha:
+  secret:
+    key: ${GOOGLE_SECRET}
+
 spring:
+  datasource:
+    url: jdbc:h2:mem:sbipdb
+    driverClassName: org.h2.Driver
+    username: sa
+    password: password
+    h2:
+      console:
+        enabled: true
+    mvc:
+      hiddenmethod:
+        filter:
+          enabled: true
+    jpa:
+      hibernate:
+        ddl-auto: none
+  cloud:
+    vault:
+      token: hvs.eqRn7Jhz8WhStBUOfCdNb2IP
+      authentication: token
+      host: localhost
+      port: 8200
+      scheme: http
+  config:
+    import: vault://, optional:file:.env[.properties]
+  application:
+      name: coursetracker
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: ${GOOGLE_EMAIL}
+    password: ${GOOGLE_APP_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+    protocol: smtp
+    test-connection: false
+
+
+  ldap:
+    embedded:
+      # ① 내장 LDAP 서버 포트
+      port: 8389
+      # ② 내장 LDIF 파일 위치
+      ldif: classpath:users.ldif
+      # ③ 내장 LDAP 서버 고유 이름
+      base-dn: dc=manning,dc=com
   data:
     mongodb:
       # authentication-database:
@@ -15,6 +69,18 @@ spring:
     embedded:
       version: 2.6.10
 
+server:
+  ssl:
+    # 키 저장소에 사용된 형식. JKS 파일인 경우 JKS로 설정될 수 있습니다.
+    key-store-type: PKCS12
+    # 인증서가 포함된 키 저장소의 경로
+    key-store: classpath:keystore/sbip.p12
+    # 인증서 생성에 사용된 비밀번호
+    key-store-password: ${keystore}
+    # 인증서에 매핑된 별칭
+    key-alias: sbip
+  # HTTPS 포트
+  port: 8081
 
 api:
   url: https://dogceo/dog-api/
@@ -29,7 +95,7 @@ management:
     web:
       base-path: /ys
       exposure:
-        include: "*", metrics,prometheus
+        include: "*"
   info:
     git:
       mode: full

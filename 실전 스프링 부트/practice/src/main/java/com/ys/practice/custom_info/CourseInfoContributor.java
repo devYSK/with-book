@@ -9,7 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.actuate.info.Info;
 import org.springframework.boot.actuate.info.InfoContributor;
 
-import com.ys.practice.fail.Course;
+import com.ys.practice.register_user.Course;
 
 import lombok.Builder;
 import lombok.Data;
