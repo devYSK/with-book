@@ -1,0 +1,58 @@
+spring:
+  data:
+    mongodb:
+      # authentication-database:
+      database: sbip
+      # field-naming-strategy:
+      gridfs:
+        database: fs-database
+      host: localhost
+      # password:
+      port: 27018
+      uri: mongodb://localhost/test
+      # username:
+  mongodb:
+    embedded:
+      version: 2.6.10
+
+
+api:
+  url: https://dogceo/dog-api/
+
+management:
+  metrics:
+    export:
+      defaults:
+        enabled: true
+
+  endpoints:
+    web:
+      base-path: /ys
+      exposure:
+        include: "*", metrics,prometheus
+  info:
+    git:
+      mode: full
+    env:
+      enabled: true
+  server:
+    port: 8081
+  endpoint:
+    health:
+      show-details: always
+
+
+
+info:
+  app:
+    name: ys Spring Boot Actuator Info Application
+    description: Spring Boot application that explores the /info endpoint
+    version: 1.0.0
+  build:
+    artifact: ${project.artifactId}
+    name: ${project.name}
+    description: ${project.description}
+    version: ${project.version}
+    properties:
+      java:
+        version: ${java.version}
