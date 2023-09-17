@@ -2106,6 +2106,613 @@ curl -H "Accept: application/vnd.sbip.app-v2+json" http://your-server-address/co
 
 # CHAPTER 8 리액티브 스프링 부트 애플리케이션 개발
 
+* 리액티브 프로그래밍과 스프링 웹플럭스 소개
+
+* 애너테이션을 붙인 컨트롤러와 함수형 엔드포인트를 사용한 리액티브 RESTful API 개발
+
+* 웹클라이언트를 사용한 리액티브 RESTful API 접근 
+* R소켓을 사용하는 스프링 부트 애플리케이션 개발 
+* 웹소켓과 스프링 부트를 사용해서 애플리케이션을 개발하는 방법
+
+## 리액티브 프로그래밍
+
+reactive programming은 asynchronous data stream을 사용하는 프로그래밍 패러다임이다. 
+
+리액티브 프로그래밍에서 말하는 데이터 스트림은 데이터가 일정 시간 간격 안에서 한 데이터 포인 트씩 차례로 방출되는 데이터 스트림을 의미한다. 
+
+데이터 스트림은 사용자 입력, 프로퍼티, cache, db 등 기타 여러 소스로부터 생성할 수 있다.
+
+<img src="./images//image-20230917134151590.png">
+
+* 전통적 데이터 프로세싱은 요청 도달, 요청 처리, 반환 이다
+
+* 스트림 프로세싱은 애플리케이션이 데이터 스트림을 구독하고, 데이터가 발생하여 획득할 수 있게 되면 구독자가 데이터를 받는다.
+* 애플리케이션은 데이터를 처리하고 결과 데이터를 다른 스트림으로 발행한다.
+
+
+
+비동기 처리란, 요청에 대한 응답이 올때까지 쓰레드가 기다리지 않고, 응답이 준비됐을 때 스레드가 받아서 처리하는 방식을 의미한다.
+
+<img src="./images//image-20230917134401891.png">
+
+동기 방식에서는 호출하는 스레드가 응답을 기다리는 동안 다른 작업을 처리하지 못하지만, 
+
+비동기 방식에서는 호출하는 스레드가 응답을 기다리지 않고 호출 직후부터 다른 작업을 처리하며, 서버가 응답을 보내면 그때 처리한다.
+
+
+
+**현실세계의 비동기 데이터 스트림 예시 - 마우스 클릭 이벤트**
+
+<img src="./images//image-20230917134542764.png">
+
+애플리케이션 사용자는 클릭해서 이벤트를 생성하고, 애플리케이션은 이벤트를 관찰하고 반응할 수 있다.
+
+Stream은 시간에 따라 연속으로 발생하는 이벤트다. 
+
+이벤트는 비동기적으로 방출되며 이벤트에 반응해서 이벤트를 처리할 수 있는 함수를 등록해서 이벤트 발생을 기다린다. 
+
+이벤트가 발생하면 값, 에러, 완료 신호를 처리할 수 있는 함수가 실행된다. 
+
+리액티브 프로그래밍에서는 이처럼 
+
+* 이벤트를 기다리는 것을 구독(subscribing)
+
+* 이벤트 발 생을 기다리면서 관찰하는 함수는 옵저버(observer), 
+
+* 관찰할 수 있는 대상인 이벤트를 방출하는 스트림은 옵저버블(observable)이며, 
+
+옵서버 디자인 패턴은 이런 관계를 활용하는 디자인 패턴이다.
+
+* https://github.com/reactive-streams/reactive-streams-jvm/blob/master/README.md
+* https://projectreactor.io/docs/core/release/reference/
+* https://docs.spring.io/spring-framework/reference/
+
+### 백프레셔
+
+프로듀서 producer와 컨슈머consumer 사이의 bush와 pull 개념을 먼저 살펴보자.
+
+<img src="./images//image-20230917143239880.png">
+
+컨슈머는 프로듀서가 만들어내는 이벤트를 구독하고 프로듀서는 컨슈머에게 이벤트를 푸시한다.
+
+컨슈머의 소비율과 프로듀서의 생산율이 같으면 위 구조는 아무런 문제 없이 잘 동작한다. 
+
+하지만 프로듀서의 생산율을 컨슈머의 소비율이 따라가지 못하면 어떻게 될까?
+
+<img src="./images//image-20230917143427864.png" width = 650>
+
+느린 컨슈머는 소비율을 초과해서 들어오는 이벤트를 유한(bounded) 또는 무한 버퍼(unbounded buffer)에 임시로 담아둬야 한다. 
+
+유한 버퍼를 사용한다면 버퍼의 한도를 초과하는 이벤트는 버려진다. 이 경우 프로듀서는 버려진 이벤트를 재전송해야 한다. 
+
+이벤트 재전송에는 추가적인 CPU, 네트워크 오버헤드가 발생하고 재전송을 위한 복잡한 로직도 필요하다. 
+
+무한 버퍼를 사용하면 애플리케이션 메모리가 빠르게 고갈될 수 있으며 결과적으로 애플리케이션은 사용할 수 없는 상태가 된다.
+
+이 문제를 해결하기 위해 `푸시 대신 풀 방식을 선택한다`.
+
+<img src="./images//image-20230917143927411.png">
+
+ `풀 방식에서는 컨슈머가 자신의 소비율에 맞게 프로듀서에게 데이터를 요청한다.` 
+
+이렇게 하면 컨슈머가 자신의 상황에 맞게 동적으로 적절한 양의 데이터를 프로듀서로부터 가져올 수 있는데,
+
+`이를 백프레셔 (backpressure)` 라고 부른다.
+
+백프레셔는 리액티브 시스템에서 생산자와 소비자 간의 데이터 흐름을 균형 있게 조절하는 중요한 개념입니다.
+
+- 데이터 생산자(예: 데이터베이스나 다른 서비스)가 데이터를 너무 빠르게 전송하면, 데이터 소비자(예: 사용자 인터페이스나 다른 서비스)가 처리할 수 없게 됩니다.
+- 이런 경우에 백프레셔 메커니즘을 사용하면 소비자가 생산자에게 "느리게 해!" 또는 "지금은 데이터를 더 보내지 마!"라고 말할 수 있습니다.
+
+### 리액티브 프로그래밍의 장점
+
+* **논블로킹** - 외부 API나 데이터베이스를 호출하는 스레드는 외부 API나 데이터베이스로부터 데이터가 반환 될 때까지 다른 일을 할 수 없도록 블로킹된 채로 기다린다. 블로킹 코드도 물론 잘 동작하지만 확장성이나 성능 관련 이슈가 발생할 수 있고, 다른 일을 하지 못하고 기다리므로 시스템 자원 낭비를 초래한다. 리액티브는 논블로킹 방식으로 동작하므로 블로킹 코드가 유발 할 수 있는 병목 현상을 제거할 수 있다.
+* **JVM에서 동작하는 더 나은 비동기 프로그래밍 모델** 
+  * 자바에서는 콜백(callback)과 퓨처(future) 방식으로 비동기 프로그래밍에 접근한다. 콜백 방식에서는 결과를 받으면 실행되는 콜백 파라미터를 비동기 메서드에 추가로 전달한다. 퓨처 방식에서는 비동기 메서드는 호출되는 즉시 `Futuers<T>`를 반환한다. 비동기 메서드가 결과를 받은 이후에만 반환된 퓨처를 통해 결과값을 받아 사용할 수 있다. 
+  * 두 가지 방식 모두 단점이 있다. 
+  * 비동기 호출이 여러 번 연쇄적으로 필요 한 상황에서는 콜백이 계속 중첩되면서 관리하기가 어려워지는데 이를 callback hell이라고 부른다. 
+  * 퓨처는 콜백보다는 상황이 조금 낫긴 하지만 비동기 연산의 조합 관점에서 불편하기는 마찬가지다. 리액티브 프로그래밍 모델은 여러 비동기 연산을 좀 더 매끄럽게 조합할 수 있다.
+
+## 프로젝트 리액터
+
+리액터는 스트림 지향 라이브러리 표준이자 명세인 리액티브 스트림에 바탕을 둔다.
+
+리액터는 시퀀스에 있는 무한한 수의 요소를 처리할 수 있고, 논블로킹 백프레셔를 사용해서 연산자 사이에 요소를 비동기적으로 전달할 수 있다.
+
+```java
+public interface Publisher<T> {
+    void subscribe(Subscriber<? super T> s);
+}
+
+public interface Subscriber<T> {
+    void onSubscribe(Subscription s);
+    void onNext(T t);
+    void onError(Throwable t);
+    void onComplete();
+}
+
+public interface Subscription {
+    void request(long n);
+    void cancel();
+}
+
+public interface Processor<T, R> extends Subscriber<T>, Publisher<R> {
+    // Processor may have additional methods, if required.
+}
+```
+
+* publisher(발행자): 무한한 수의 요소를 만들어 낼 수 있고 구독자가 요청한 만큼만 발행한다. 
+  * Publisher 인터페이스의 subscribe() 메서드를 통해 구독자가 발행자를 구독할 수 있다.
+* Subscriber(구독자) : 언제 얼마만큼의 요소를 처리할 수 있을지 결정하고 구독한다. 
+  * onSubscribe() 메서드의 파라미터로 구독을 전달받아서 publisher에 데이터를 요청하고 반환받은 데이터를 onNext() 메서드를 사용해서 처리한다.
+  * 에러발생시 onError() 메서드로 에러를 처리하고, onComplete() 메서드를 사용해서 처리를 완료한다
+
+* Subscription(구독) : 구독자와 발행자의 관계로, request() 메서드로 데이터를 요청하고 cance()을 통해 구독을 취소한다
+* Processor - 프로세서는 처리 단계를 나타내며 publisher, Subscriber 인터페이스를 상속
+
+<img src="./images//image-20230917145822721.png">
+
+1. ﻿﻿﻿구독자는 Publisher 인터페이스의 subscribe() 메서드를 호출하면서 자신이 구독한다는 사실을 발행자에게 알린다.
+2. ﻿﻿﻿발행자는 Subscription을 생성하고 Subscriber 인터페이스의 onsubscribe() 메서드를 호출 해서 구독자에게 전달한다.
+3. ﻿﻿﻿구독자는 Subscription 인터페이스의 request() 또는 cancel() 메서드를 호출해서 발행자에 게 데이터를 요청하거나 구독을 취소한다.
+4. ﻿﻿﻿발행자는 Subscriber 인터페이스의 onNext(), onComplete(), onError() 메서드를 호출해서 데이터나 에러 또는 완료 신호를 구독자에게 보낸다.
+
+리액터는 Publisher 인터페이스 구현체인 Flux와 Mono라는 타입을 제공한다.
+
+<img src="./images//image-20230917150511138.png">
+
+* Flux : 0~N개의 아이템으로 구성된 비동기 시퀀스. 에러나 완료신호를 통해 종결
+* Mono : 0~1개의 아이템으로 onNext 시그널을 통해 최대 1개 아이템을 방출(성공 Mono)하거나 에러 (실패 Mono)로 스트림을 종결하는 발행자 
+
+## 스프링 웹플럭스 
+
+애너테이션 컨트롤러 모델과 함수형 엔드포인트라는 두가지 프로그래밍 모델을 가진다
+
+* 애너테이션 컨트롤러 모델은 스프링 MVC와 호환된다
+* 함수형 엔드포인트 모델은 람다식 기반의 가변은 함수형 프로그래밍 모델을 제공한다 
+
+```groovy
+implementation 'org.springframework.boot:spring-boot-starter-webflux'
+implementation 'org.springframework.boot:spring-boot-starter-data-mongodb-reactive'
+testImplementation 'io.projectreactor:reactor-test'
+```
+
+스프링 웹플럭스에서는 DispatcherHandler가 HTTP 요청을 처리하는 중추 역할을 담당한다. 
+
+ 등록된 매퍼와 핸들러에게 요청을 전달해서 처리한다. 
+
+HandlerMapping 인스턴스는 적합한 핸들러 객체에게 요청을 매핑해주는 역할을 담당한다. 
+
+HandlerAdapter는 지원하는 핸들러 객체를 활용해 서 요청을 처리하고 HandlerResult를 반환한다. 
+
+마지막으로 HandlerResultHandler가 HandlerResult를 처리한다.
+
+### Route를 이용한 함수형 엔드포인트
+
+ RouteContext 클래스에 라우트route를 정의한다. 라우트는 CRUD 연산으로 매핑되는 URL을 의미한다.
+
+```java
+@Configuration
+public class RouterContext {
+
+	@Bean
+	RouterFunction<ServerResponse> routes(CourseHandler courseHandler) {
+		return route(GET("/courses").and(accept(APPLICATION_JSON)), courseHandler::findAllCourses)
+				.andRoute(GET("/courses/{id}").and(accept(APPLICATION_JSON)), courseHandler::findCourseById)
+				.andRoute(POST("/courses").and(accept(APPLICATION_JSON)), courseHandler::createCourse)
+				.andRoute(PUT("/courses").and(accept(APPLICATION_JSON)), courseHandler::updateCourse)
+				.andRoute(DELETE("/courses/{id}").and(accept(APPLICATION_JSON)), courseHandler::deleteCourse)
+				.andRoute(DELETE("/courses").and(accept(APPLICATION_JSON)), courseHandler::deleteAllCourses);
+	}
+
+}
+```
+
+실제 CRUD는 핸들러에게 위임한다
+
+```java
+@Component
+public class CourseHandler {
+
+	private CourseRepository courseRepository;
+
+	@Autowired
+	public CourseHandler(CourseRepository courseRepository) {
+		this.courseRepository = courseRepository;
+	}
+
+	public Mono<ServerResponse> findAllCourses(ServerRequest serverRequest) {
+		Flux<Course> courses = this.courseRepository.findAll();
+		return ServerResponse.ok().contentType(APPLICATION_JSON).body(courses, Course.class);
+	}
+
+	public Mono<ServerResponse> findCourseById(ServerRequest serverRequest) {
+		String courseId = serverRequest.pathVariable("id");
+		Mono<Course> courseMono = this.courseRepository.findById(courseId);
+		return courseMono.flatMap(course -> ServerResponse.ok().contentType(APPLICATION_JSON).body(fromValue(course)))
+				.switchIfEmpty(notFound());
+	}
+ ...
+}
+```
+
+*  ServerRequest는 클라이언트의 요청을 담고 있는 서버 측 HTTP 요청 객체다. 모든 과정을 조회해서 Content-typeol application/ json인 과정 목록을 응답 본문으로 ServerResponse에 담는다. ServerResponse는 서버 측 응답 객체다.
+
+* path variable로 넘어온 ID 값으로 과정을 조회해 서 있으면 HTTP 200 OK를, 없으면 HTTP 404 Not Found를 ServerResponse에 담아 반환한다.
+
+### WebClient 커스텀 로깅
+
+```java
+public class WebClientApi {
+    private final WebClient webClient;
+
+    private static final String BASE_URL = "YourBaseURLHere"; // BASE_URL을 적절하게 설정해주세요.
+    private static final String USER_AGENT = "YourUserAgentHere"; // USER_AGENT를 적절하게 설정해주세요.
+
+    public WebClientApi() {
+        this.webClient = WebClient.builder()
+                .baseUrl(BASE_URL)
+                .clientConnector(getClientConnector())
+                .defaultHeader(HttpHeaders.USER_AGENT, USER_AGENT)
+                .exchangeStrategies(
+                        ExchangeStrategies.builder()
+                                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(30 * 1024 * 1024))
+                                .build())
+                .filter(logRequest())
+                .filter(logResponse())
+                .build();
+    }
+
+    public ReactorClientHttpConnector getClientConnector() {
+        return new ReactorClientHttpConnector(
+                HttpClient.create()
+                        .followRedirect(true)
+                        .compress(true)
+                        .secure()
+                        .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 3000)
+        );
+    }
+
+    private static ExchangeFilterFunction logRequest() {
+        return ExchangeFilterFunction.ofRequestProcessor(clientRequest -> {
+            System.out.println("Request: " + clientRequest.method() + " " + clientRequest.url());
+            clientRequest.headers().forEach((name, values) -> values.forEach(value -> System.out.println(name + ": " + value)));
+            return Mono.just(clientRequest);
+        });
+    }
+
+    private static ExchangeFilterFunction logResponse() {
+        return ExchangeFilterFunction.ofResponseProcessor(clientResponse -> {
+            System.out.println("Response: " + clientResponse.statusCode());
+            clientResponse.headers().asHttpHeaders().forEach((name, values) -> values.forEach(value -> System.out.println(name + ": " + value)));
+            return Mono.just(clientResponse);
+        });
+    }
+}
+
+```
+
+## R소켓 (RSocket)
+
+* https://rsocket.io/
+* https://github.com/real-logic/aeron
+
+R소켓은 TCP, 웹소켓, 애런Aeron(https://github.com/real-logic/aeron) 같은 프로토콜 위에서 
+
+멀티플렉싱, 듀플렉싱을 지원하는 애플리케이션 프로토콜이다. R소켓은 네 가지 통신 모델을 제공한다.
+
+<img src="./images//image-20230917160522420.png">
+
+* fire & forget(실행 후 망각) : 클라이언트가 메시지 한개를 전송하고 서버로부터 응답을 기대하지 않는 방식
+* request-response(요청-응답) : 클라이언트가 한개의 메시지 전송, 서버로부터 한개로 돌려받음
+* request-stream(요청-스트림) : 클라이언트가 한개의 메시지를 전송하고, 서버로부터 여러 메시지를 스트림으로 받음
+* channel(채널) : 클라이언트와 서버가 서로 스트림을 주고받는다
+
+R소켓에서는 클라이언트와 서버사이 초기 handShake가 완료된 이후에는 클라,서버가 서로 독립적으로 상호작용 하므로 서로 구별이 사라진다.
+
+**R소켓 프로토콜에서 중요한 몇 가지 키워드와 장점은 다음과 같다.**
+
+- ﻿﻿`리액티브 스트림에서 강조하는 스트리밍과 백프레셔` - 요청-스트림 패턴과 채널 패턴에서 streaming 처리를 지원하고, 네 가지 패턴 모두에서 백프레셔를 사용할 수 있다. 이를 통해 요청하는 쪽에서 응답이 들어오는 속도를 조절할 수 있고, 네트워크 계층 혼잡 제어나 네트워크 수준 버퍼링에 대한 의존도를 낮출 수 있다.
+- ﻿﻿요청 스로틀링(throttling) - LEASE 프레임을 전송하면 특정 시점에 상대방 쪽에서 수용할 수 있는 요청의 총 개수를 제한할 수 있다
+- 대용량 메시지의 분할(frgmentation) 및 재조립(reassembly)
+- 생존신호(heartbeat) 메시지를 통한 keepalive 유지
+
+
+
+Spring에서는 spring-messaging 모듈을 통해 R소켓 프로토콜을 지원한다.
+
+```groovy
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-rsocket
+    testImplementation 'io.projectreactor:reactor-test'
+}
+
+```
+
+application.yml 파일을 작성해서 R소켓 서버 포트와 지연 초기화를 설정 한다.
+
+````yaml
+spring:
+  rsocket:
+    server:
+      port: 7000
+  main:
+    lazy-initialization: true
+
+````
+
+ RSC는 R소켓 엔드포인트를 호출할 수 있는 명령행 도구다. 설치 방법은 https://github.com/making/rsc를 참고하자
+
+* m1의 경우 https://github.com/HomoEfficio/dev-tips/blob/master/Mac-Silicon-homebrew-Intel-x86_64.md
+
+```shell
+이거 상당히 귀찮으므로 다음 방법을 이용하자 
+```
+
+RSC 대신에 spring-messaging에서 제공하는 RSocketRequester를 사용해서 소켓 엔 드포인트를 호출하는 방법을 알아보자
+
+```java
+
+@SpringBootTest
+class RsocketApplicationTests {
+	private static RSocketRequester requester;
+
+	@BeforeAll
+	static void setUpOnce(
+		@Autowired RSocketRequester.Builder builder,
+		@LocalRSocketServerPort Integer port,
+		@Autowired RSocketStrategies rSocketStrategies) {
+		// 초기 설정 메소드
+		requester = builder.tcp("localhost", port);
+	}
+
+	@Test
+	void testRequestResponse() {
+		// 요청-응답 테스트: Spring이라는 코스를 요청하고, 응답을 검증합니다.
+		Mono<Course> courseMono = requester.route("request-response")
+										   .data(new Course("Spring"))
+										   .retrieveMono(Course.class);
+
+		StepVerifier.create(courseMono)
+					.consumeNextWith(course -> assertThat(course.getCourseName()).isEqualTo("Your course name: Spring"))
+					.verifyComplete();
+	}
+
+	@Test
+	void testFireAndForget() {
+		// Fire-and-Forget 테스트: 요청을 보내고, 어떠한 응답도 기다리지 않습니다.
+		Mono<Course> courseMono = requester.route("fire-and-forget")
+										   .data(new Course("Spring"))
+										   .retrieveMono(Course.class);
+
+		StepVerifier.create(courseMono)
+					.verifyComplete();
+	}
+
+	@Test
+	void testRequestStream() {
+		// 요청 스트림 테스트: Spring이라는 코스에 대한 스트림 요청을 보내고, 응답 스트림을 검증합니다.
+		Flux<Course> courseFlux = requester.route("request-stream")
+										   .data(new Course("Spring"))
+										   .retrieveFlux(Course.class);
+
+		StepVerifier.create(courseFlux)
+					.consumeNextWith(
+						course -> assertThat(course.getCourseName()).isEqualTo("Your course name: Spring. Response #0"))
+					.expectNextCount(0)
+					.consumeNextWith(
+						course -> assertThat(course.getCourseName()).isEqualTo("Your course name: Spring. Response #1"))
+					.thenCancel()
+					.verify();
+	}
+
+	@Test
+	void testChannel() {
+		// 채널 테스트: 설정을 기반으로 스트림 요청을 보내고, 응답 스트림을 검증합니다.
+		Mono<Integer> setting1 = Mono.just(2)
+									 .delayElement(Duration.ofSeconds(0));
+		Mono<Integer> setting2 = Mono.just(1)
+									 .delayElement(Duration.ofSeconds(3));
+
+		Flux<Integer> settings = Flux.concat(setting1, setting2);
+
+		Flux<Course> stream = requester.route("stream-stream")
+									   .data(settings)
+									   .retrieveFlux(Course.class);
+
+		StepVerifier
+			.create(stream)
+			.consumeNextWith(course -> assertThat(course.getCourseName()).isEqualTo("Spring. Response #0"))
+			.consumeNextWith(course -> assertThat(course.getCourseName()).isEqualTo("Spring. Response #0"))
+			.thenCancel()
+			.verify();
+	}
+
+}
+
+```
+
+
+
+## 웹소켓
+
+HTTP의 단점을 해결할 목적으로 만들어진 웹소켓 프로토콜(https://datatracker.ietf.org/doc/html/rfc6455)이 나왔다. 
+
+웹소켓은 한 개의 TCP 커넥션상에서 전이중(ull-duplex, 양방향(wo way 의사소통 채널을 만들어 사용할 수 있는 표준 프로토콜이다. 
+
+웹소켓은 양방향 의사소통이 가능하도록 설계됐으므로 다른 우회 방법을 사용할 필요가 없다. 
+
+웹소켓은 HTTP와는 다른 프로토콜이지만 80 포트를 사용하는 HTTP나 443 포트를 사용하는 HTTPS 위에서 동작하도록 설계됐다.
+
+<img src="./images//image-20230917163344866.png">
+
+웹소켓에서는 초기 handshake가 성립되면 클라-서버간 서로에게 데이터를 전송할 수 있다.
+
+초기 핸드셰이크에서만 HTTP가 사용되고, 후에는 새로운 TCP/IP 웹소켓 연결로 업그레이드 된다.
+
+웹소켓은 저수준 프로토콜이며 바이트 스트림이 프레임으로 변환되는 방식을 정의한다. 
+
+프레임은 바이너리 메시지나 텍스트 메시지를 포함할 수 있다. 하
+
+지만 메시지에는 라우팅이나 메시지 처리에 대한 추가적인 정보는 포함되지 않는다. 
+
+추가적인 코딩 작업 없이 웹소켓 프로토콜을 있는 그대로 사용하기는 어려운데, 
+
+스프링에서 지원하는 STOMP의 고수준 서브프로토콜로 사용할 수 있다.
+
+```groovy
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+}
+```
+
+```java
+@Configuration
+@EnableWebSocketMessageBroker
+public class WebSocketConfiguration implements WebSocketMessageBrokerConfigurer {
+
+	@Override
+	public void registerStompEndpoints(StompEndpointRegistry registry) {
+		registry.addEndpoint("/ws").withSockJS();
+	}
+	
+	@Override
+	public void configureMessageBroker(MessageBrokerRegistry registry) {
+		registry.enableSimpleBroker("/topic");
+		registry.setApplicationDestinationPrefixes("/app");
+	}
+}
+```
+
+1. ﻿﻿StompEndpointRegistry 인터페이스를 사용해서 웹소켓 엔드포인트에 STOMP를 등록한다.
+2. ﻿﻿MessageBrokerRegistry 클래스를 사용해서 메시지 브로커 옵션을 설정한다.
+
+`registerStompEndpoints()` 메서드는 웹소켓 엔드포인트인 ``/ws`에 STOMP 엔드포인트를 등록한 다. 그리고 withSockJs() 메서드를 호출해서 SockJS 폴백 옵션을 활성화한다. Sockjs(https://github.com/sockjs/sockjs-client)를 사용하면 웹소켓 프로토콜을 지원하지 않는 브라우저에서도 웹소켓이 동작하도록 만들어준다.
+
+`configureMessageBroker` 메서드는 메시지를 주고받을 한 개 이상의 목적지를 가진 인메모리 메시지 브로커를 생성한다. 
+예제에서는 /topic으로 시작하는 한 개의 목적지를 생성했다. 
+
+그리고 애플리케이션 목적지 접두어를 /app로 지정했다. 이를 통해 MessagingMapping 애너테이션이 붙어 있는 메서드의 목적지를 필터링할 수 있다.
+
+```java
+@Slf4j
+@Controller
+public class MessageController {
+
+	@MessageMapping("/chat")
+	@SendTo("/topic/messages")
+	public OutputMessage message(InputMessage message) {
+		log.info("Input Message " + message);
+		
+		return OutputMessage.builder()
+							.time(Instant.now(Clock.systemDefaultZone()))
+							.content(message.getContent())
+							.build();
+	}
+}
+```
+
+@SendTo 애너테이션은 /topic/messages 엔드포인트를 구독하는 모든 클라이언트에게 메시지를 브로드캐스팅한다
+
+이제 메시지를 주고받을 클라이언트 HTML, 페이지를 작성해보자. 
+src/main/resources 폴더에 index.html 페이지를 작성한다.
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="UTF-8">
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Spring Boot WebSocket</title>
+</head>
+
+<body>
+	<label for="message-input">Enter your message</label>
+	<input type="text" class="form-control" id="message-input">
+	<button type="submit" onclick="sendMessage()">Send</button>
+	<ul id="message-list"></ul>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.5.1/sockjs.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+	<script src="js/main.js"></script>
+</body>
+
+</html>
+```
+
+* sockJS와 stomp.js를 CDN으로부터 다운받는다.
+
+다음 main.js파일은 웹소켓 연결을 시작하고 /topic/messages 엔드포인트를 구독한다.
+
+```javascript
+// http://localhost:8080/ws에서 WebSocket 연결을 생성합니다.
+let sock = new SockJS('http://localhost:8080/ws');
+
+// WebSocket 엔드포인트로 새 StompClient 객체를 생성합니다.
+let client = Stomp.over(sock);
+
+// STOMP 통신을 시작하고, CONNECTED 프레임이 도착할 때의 콜백을 제공합니다.
+client.connect({}, (frame) => {
+    // "/topic/messages"를 구독합니다. 새 메시지가 있을 때마다, 순서 없는 목록에서 list-item 요소에 텍스트를 추가합니다.
+    console.log("Frame is: " + frame);
+    client.subscribe('/topic/messages', (payload) => {
+        let message_list = document.getElementById('message-list');
+        let message = document.createElement('li');
+        let output = JSON.parse(payload.body);
+        message.appendChild(document.createTextNode(output.content + " at " + output.time));
+        message_list.appendChild(message);
+    });
+});
+
+// 메시지를 보내는 함수입니다. HTML 페이지에서 'Send'를 클릭할 때 이 함수가 호출됩니다.
+// 'message-input' 텍스트 필드의 값을 가져와서 빈 헤더 ({})로 서버에 전송합니다.
+function sendMessage() {
+    console.log("Sending message");
+    let input = document.getElementById('message-input');
+    client.send('/app/chat', {}, JSON.stringify({content: input.value}));
+}
+
+```
+
+### 웹소켓 애플리케이션에서 클라이언트와 서버 사이에 핸드셰이크가 일어나는 방법
+
+<img src="./images//image-20230917164248575.png">
+
+연결이 맺어지는 초기 단계에서 클라이언트는 예제 8.32와 같이 웹소켓 연결을 요청하는 데 필요한 몇 가지 특수 HTTP 헤더를 서버에 보낸다.
+
+```http
+GET ws://localhost:8080/ws/257/vktswatd/websocket HTTP/1.1
+Host: localhost:8080
+Connection: Upgrade
+Upgrade: websocket
+Origin: http://localhost:8080
+Sec-WebSocket-Version: 13
+Accept-Encoding: gzip, deflate, br
+Accept-Language: en-US, en; q=0.9
+Sec-WebSocket-Key: kVE6E10MjfIi4bPZzojWzA==
+Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits
+```
+
+* 최초 요청은 HTTP GET 이여야 한다.
+* 클라이언트는 웹소켓 프로토콜로 업그레이드 하거나 전환하기 위해 HTTP Upgrade 헤더를 사용해서 서버와 통신을 시작한다.
+* 서버가 웹소켓 프로토콜을 지원하면 HTTP 200 OK 대신에 HTTP 101 Switching Protocols 응답코드를 반환한다
+
+```http
+HTTP/1.1 101 Switching Protocols
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+Upgrade: websocket
+Connection: upgrade
+Sec-WebSocket-Accept: VNLDOJwTIhnIFr6XKRZdiCX2VK=
+Sec-WebSocket-Extensions: permessage-deflate; client_max_window_bits=15
+Date: Wed, 28 Jul 2821 10:30:46 GMT
+
+```
+
+핸드셰이크가 성공하면 HTTP 업그레이드 요청에 사용된 TCP  소켓은 열린채로 유지되고, 클라이언트와 서버가 서로 메시지를 주고 받을 수 있다. 
+
 
 
 # CHAPTER 9 스프링 부트 애플리케이션 배포

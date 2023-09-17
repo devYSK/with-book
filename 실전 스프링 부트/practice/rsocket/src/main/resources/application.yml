@@ -1,0 +1,6 @@
+spring:
+  rsocket:
+    server:
+      port: 9000
+  main:
+    lazy-initialization: true
