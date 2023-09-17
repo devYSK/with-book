@@ -1562,11 +1562,545 @@ captcha:
     key: ${GOOGLE_SECRET}
 ```
 
+이후 컨트롤러나 인터셉터에서 헤더 값을 받아서 검증에 사용하면 된다.
+
+```java
+@Controller
+public class RegistrationController {
+
+	private final UserService userService;
+	private final GoogleRecaptchaService captchaService;
+
+	private final ApplicationEventPublisher eventPublisher;
+
+	@Value("${app.email.verification:N}")
+	private String emailVerification;
+
+	@PostMapping("/adduser") // 캡차값을 전송받는 엔드포인트 
+	public String register(@Valid @ModelAttribute("user") UserDto userDto, 
+                         HttpServletRequest httpServletRequest,
+                         BindingResult result) {
+		if (result.hasErrors()) {
+			return "add-user";
+		}
+    
+		String response = httpServletRequest.getParameter("g-recaptcha-response"); // 값을 받는다
+		
+		if (response == null) { // 캡차값이 없다면 잘못된 페이지
+			return "add-user";
+		}
+    
+		String ip = httpServletRequest.getRemoteAddr(); // 요청한 ip값 검증 
+    
+		RecaptchaDto recaptchaDto = captchaService.verify(ip, response); // 캡차서비스로 받아 구글로 전송해서 인증받는다. 
+    
+		if (!recaptchaDto.isSuccess()) { // 캡차 서비스 실패시 반환 
+			return "redirect:adduser?incorrectCaptcha";
+		}
+
+    .. 생략
+		return "redirect:adduser?success";
+	}
+
+}
+
+```
+
+
+
 ## 구글 multi-factor authentication
 
 
 
-# CHAPTER 7 스프링 부트 RESTful 웹 서비스 개
+다단계 인증(mult-factor authentication, MFA)은 사용자가 여러 단계의 인증 과정을 거치도록 강제하는 인증 패턴이다. 
+
+2단계 인증 two-factor authentication은 다단계 인증의 한 방식으로 서로 다른 수준의 2단 계 인증 과정으로 구성된다.
+
+아이디/패스워드 외에 추가로 일회성 비밀번호one time password를 사용해서 아이디/패스워드 인증의 단점을 보완한다.
+
+2단계 인증 주요 흐름 
+
+1. ﻿﻿﻿사용자가 등록되면 새 계정이 생성된다.
+2. ﻿﻿﻿최초 로그인 시 2단계 인증을 활성화할 것인지 묻는다. 사용자가 활성화를 원하지 않으면 index 페이지로 이동한다.
+3. ﻿﻿﻿사용자가 2단계 인증 활성화를 선택하면 QR 코드를 생성해서 화면에 보여주고 스마트폰에 있는 구글 오센티케이터 앱으로 스캔하도록 안내한다.
+4. ﻿﻿﻿스캔을 통해 CourseTracker 앱이 구글 오센티케이터 앱에 등록되면 앱에 표시된 OIP 값을 2단계 인증 등록 페이지에서 입력받는다. 이를 통해 해당 사용자는 2단계 인증을 사용하도록 설 정된다. 이후 로그인 시 아이디/패스워드뿐만 아니라 구글 오센티케이터 앱에서 생성된 OTP 값 도 입력해야 로그인에 성공한다.
+5. ﻿﻿﻿2단계 인증을 활성화하지 않은 사용자에 대해서는 로그인할 때마다 2단계 인증 활성화 여부를 묻는다. 예제에서는 이 방식을 사용하지만 실제로는 로그인할 때마다 사용자를 불편하게 만들지 않고 별도의 메뉴를 두어 2단계 인증 활성화 여부를 설정할 수 있도록 하는것이 좋다
+
+* https://github.com/wstrange/GoogleAuth 참고 가능하다. 
+
+```groovy
+implementation 'com.warrenstrange:googleauth:1.5.0'
+```
+
+2단계 인증용 사용자 entity
+
+```java
+@Entity
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+@Table(name = "CT_TOTP_DETAILS")
+public class TotpDetails {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private long id;
+    private String username;
+    private String secret;
+    
+}
+```
+
+
+
+로그인 성공 후 2단계 인증 활성화를 사용자가 선택할 수 있게 SuccessHandler 구현
+
+```java
+@Component
+public class DefaultAuthenticationSuccessHandler implements AuthenticationSuccessHandler {
+
+	private RedirectStrategy redirectStrategy = new DefaultRedirectStrategy();
+
+	public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
+		Authentication authentication) throws IOException, ServletException {
+        
+		if (isTotpAuthRequired(authentication)) {
+			redirectStrategy.sendRedirect(request, response, "/totp-login");
+		} else {
+			redirectStrategy.sendRedirect(request, response, "/account");
+		}
+	}
+
+	private boolean isTotpAuthRequired(Authentication authentication) {
+		Set<String> authorities = AuthorityUtils.authorityListToSet(authentication.getAuthorities());
+		return authorities.contains("TOTP_AUTH_AUTHORITY");
+	}
+  
+}
+```
+
+로그인 성공 후 인증 정보에 TOTP_AUTH_AUTHORITY 권한이 포함돼 있으면 totp-login 엔드포인트로 리다이렉트하고, 포함돼 있지 않으면 account 엔드 포인트로 리다이렉트한다.
+
+account 엔드포인트는 사용자가 2단계 인증을 설정할 수 있 는 페이지로 리다이렉트한다. account 엔드포인트와 2단계 인증 설정에 필요한 엔드포인트를 포함 하는 AccountController 클래스를 정의한다
+
+```java
+@Controller
+@ControllerAdvice
+@RequiredArgsConstructor
+public class AccountController {
+
+	private final TotpService totpService;
+
+	@GetMapping("/account")
+	public String getAccount(Model model, @AuthenticationPrincipal CustomUser customUser) {
+
+		if (customUser != null && !customUser.isTotpEnabled()) {
+			model.addAttribute("totpEnabled", customUser.isTotpEnabled());
+			model.addAttribute("configureTotp", true);
+		} else {
+			model.addAttribute("totpEnabled", true);
+		}
+
+		return "account";
+	}
+
+	@GetMapping("/setup-totp")
+	public String getGoogleAuthenticatorQrUrl(Model model, @AuthenticationPrincipal CustomUser customUser) {
+
+		String username = customUser.getUsername();
+		boolean isTotp = customUser.isTotpEnabled();
+
+		if (!isTotp) {
+			model.addAttribute("qrUrl", totpService.generateAuthenticationQrUrl(username));
+			model.addAttribute("code", new TotpCode());
+			return "account";
+		}
+
+		model.addAttribute("totpEnabled", true);
+		return "account";
+	}
+
+	@PostMapping("/confirm-totp")
+	public String confirmGoogleAuthenticatorSetup(Model model, @AuthenticationPrincipal CustomUser customUser,
+		TotpCode totpCode) {
+
+		boolean isTotp = customUser.isTotpEnabled();
+
+		if (!isTotp) {
+			try {
+				totpService.enableTotpForUser(customUser.getUsername(), Integer.valueOf(totpCode.getCode()));
+			} catch (InvalidVerificationCode ex) {
+				model.addAttribute("totpEnabled", customUser.isTotpEnabled());
+				model.addAttribute("confirmError", true);
+				model.addAttribute("configureTotp", false);
+				model.addAttribute("code", new TotpCode());
+				return "account";
+			}
+
+			model.addAttribute("totpEnabled", true);
+		}
+		
+		customUser.setTotpEnabled(true);
+		
+		return "redirect:/logout";
+	}
+
+	@ExceptionHandler(InvalidVerificationCode.class)
+	public String handleInvalidTOTPVerificationCode(InvalidVerificationCode ex, Model model,
+		@AuthenticationPrincipal CustomUser user) {
+		boolean userHasTotpEnabled = user.isTotpEnabled();
+		model.addAttribute("totpEnabled", userHasTotpEnabled);
+		model.addAttribute("confirmError", true);
+		model.addAttribute("code", new TotpCode());
+		return "account";
+	}
+
+}
+
+```
+
+TotpService는 TOTP를 생성하고 검증하는 역할을 담당한다. 
+
+```java
+@Service
+public class TotpService {
+
+	private final GoogleAuthenticator googleAuth = new GoogleAuthenticator();
+	private final TotpRepository totpRepository;
+	private final UserRepository userRepository;
+	private static final String ISSUER = "CourseTracker";
+
+	public TotpService(TotpRepository totpRepository, UserRepository userRepository) {
+		this.totpRepository = totpRepository;
+		this.userRepository = userRepository;
+	}
+
+	@Transactional
+	public String generateAuthenticationQrUrl(String username) {
+		GoogleAuthenticatorKey authenticationKey = googleAuth.createCredentials();
+		String secret = authenticationKey.getKey();
+		totpRepository.deleteByUsername(username);
+		totpRepository.save(new TotpDetails(username, secret));
+		return GoogleAuthenticatorQRGenerator.getOtpAuthURL(ISSUER, username, authenticationKey);
+	}
+
+	public boolean isTotpEnabled(String userName) {
+		return userRepository.findByUsername(userName)
+							 .isTotpEnabled();
+	}
+
+	public void enableTotpForUser(String username, int code) {
+		if (!verifyCode(username, code)) {
+			throw new InvalidVerificationCode("Invalid verification code");
+		}
+
+		User user = userRepository.findByUsername(username);
+		user.setTotpEnabled(true);
+		userRepository.save(user);
+	}
+
+	public boolean verifyCode(String userName, int verificationCode) {
+		TotpDetails totpDetails = totpRepository.findByUsername(userName);
+		return googleAuth.authorize(totpDetails.getSecret(), verificationCode);
+	}
+}
+```
+
+다음, 로그인한 사용자의 2단계 인증 활성화 여부에 따라 `TOTP_AUTH_AUTHORITY` 권한을 부여하는 CustomUserDetailsService 클래스를 정의한다
+
+```java
+
+@Service
+@RequiredArgsConstructor
+public class CustomUserDetailsService implements UserDetailsService {
+
+	private final UserRepository userRepository;
+
+	public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+		User user = userRepository.findByUsername(username);
+
+		if (user == null) {
+			throw new UsernameNotFoundException(username);
+		}
+
+		SimpleGrantedAuthority simpleGrantedAuthority = null;
+
+		if (user.isTotpEnabled()) {
+			simpleGrantedAuthority = new SimpleGrantedAuthority("TOTP_AUTH_AUTHORITY");
+		} else {
+			simpleGrantedAuthority = new SimpleGrantedAuthority("ROLE_USER");
+		}
+
+		CustomUser customUser = new CustomUser(user.getUsername(), user.getPassword(), true, true, true, true,
+			List.of(simpleGrantedAuthority));
+
+		customUser.setTotpEnabled(user.isTotpEnabled());
+
+		return customUser;
+	}
+
+}
+```
+
+TOTP가 활성화되면 사용자는 이후 로그인할 때마다 OTP를 입력해야 한다. 
+
+입력받은 OTP 값을 검증하는 방법은 여러 가지다. 
+
+* 예를 들어 컨트롤러에 검증 로직을 두고 검증 결과에 따라 적절한 페이지로 리다이렉트할 수 있다.
+
+하지만 예제에서는 OTP를 검증하는 로직을 포함하는 필터를 정의하고, 이 필터를 스프링 시큐리 티 필터 체인에 포함해서 스프링 시큐리티가 자동으로 검증하도록 구현한다
+
+```java
+
+@Component
+@RequiredArgsConstructor
+public class TotpAuthFilter extends GenericFilterBean {
+
+	private final TotpService totpService;
+	private static final String ON_SUCCESS_URL = "/index";
+	private static final String ON_FAILURE_URL = "/totp-login-error";
+	
+	private final RedirectStrategy redirectStrategy = new DefaultRedirectStrategy();
+
+	public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) throws
+		IOException,
+		ServletException {
+
+		Authentication authentication = SecurityContextHolder.getContext()
+															 .getAuthentication();
+
+		String code = request.getParameter("totp_code");
+
+		if (!requiresTotpAuthentication(authentication) || code == null) {
+			chain.doFilter(request, response);
+			return;
+		}
+
+		if (totpService.verifyCode(authentication.getName(), Integer.parseInt(code))) {
+			Set<String> authorities = AuthorityUtils.authorityListToSet(authentication.getAuthorities());
+			authorities.remove("TOTP_AUTH_AUTHORITY");
+			authorities.add("ROLE_USER");
+			
+			authentication = new UsernamePasswordAuthenticationToken(authentication.getPrincipal(),
+				authentication.getCredentials(), buildAuthorities(authorities));
+			
+			SecurityContextHolder.getContext()
+								 .setAuthentication(authentication);
+			
+			redirectStrategy.sendRedirect((HttpServletRequest)request, (HttpServletResponse)response, ON_SUCCESS_URL);
+		} else {
+			redirectStrategy.sendRedirect((HttpServletRequest)request, (HttpServletResponse)response, ON_FAILURE_URL);
+		}
+
+	}
+
+	private boolean requiresTotpAuthentication(Authentication authentication) {
+		if (authentication == null) {
+			return false;
+		}
+
+		Set<String> authorities = AuthorityUtils.authorityListToSet(authentication.getAuthorities());
+		boolean hasTotpAuthority = authorities.contains("TOTP_AUTH_AUTHORITY");
+
+		return hasTotpAuthority && authentication.isAuthenticated();
+	}
+
+	private List<GrantedAuthority> buildAuthorities(Collection<String> authorities) {
+		List<GrantedAuthority> authList = new ArrayList<>(1);
+
+		for (String authority : authorities) {
+			authList.add(new SimpleGrantedAuthority(authority));
+		}
+
+		return authList;
+	}
+
+}
+
+```
+
+필터체인에 등록한다.
+
+```java
+@Bean
+public SecurityFilterChain httpSecurity(HttpSecurity http) throws Exception {
+		http.addFilterBefore(totpAuthFilter, UsernamePasswordAuthenticationFilter.class);
+		http.authorizeRequests()
+			.... 
+      .antMatchers("/totp-login", "/totp-login-error").hasAuthority("TOTP_AUTH_AUTHORITY")
+			.anyRequest().hasRole("USER").and()
+			.formLogin().loginPage("/login")
+			.successHandler(new DefaultAuthenticationSuccessHandler()).failureUrl("/login-error");
+
+		return http.build();
+}
+```
+
+
+
+## 액츄에이터 엔드포인트 보호
+
+```java
+@Configuration
+@EnableWebSecurity
+@RequiredArgsConstructor
+public class SecurityConfiguration {
+
+	@Bean
+	public UserDetailsService userDetailsService() {
+
+		final var actuatorUser = User.builder()
+									 .username("admin")
+									 .password(passwordEncoder().encode("admin"))
+									 .roles("ENDPOINT_ADMIN")
+									 .build();
+
+		return new InMemoryUserDetailsManager(peter);
+	}
+
+	@Bean
+	public SecurityFilterChain httpSecurity(HttpSecurity http) throws Exception {
+
+		http.authorizeRequests()
+			.antMatchers("/adduser", "/login", "/setup-totp","/confirm-totp")
+			.permitAll()
+			.requestMatchers(EndpointRequest.to("health"))
+			.hasAnyRole("USER", "ENDPOINT_ADMIN")
+			.requestMatchers(EndpointRequest.toAnyEndpoint())
+			.hasRole("ENDPOINT_ADMIN")
+			.anyRequest()
+			.hasRole("USER")
+			.and()
+			.formLogin()
+			.loginPage("/login")
+			.successHandler(new DefaultAuthenticationSuccessHandler())
+			.failureUrl("/login-error");
+
+		return http.build();
+	}
+  
+}
+```
+
+
+
+# CHAPTER 7 스프링 부트 RESTful 웹 서비스 개발
+
+## Rest API 버저닝
+
+다음과 같이 다양한 API 버저닝 기법을 살펴본다.
+
+- ﻿﻿URI 버저닝 - URI에 버전 번호를 붙인다.
+- ﻿﻿요청 파라미터 버저닝- 버전 번호를 나타내는 HTTP 요청 파라미터를 추가한다.
+- ﻿﻿커스텀 HTTP 헤더 버저닝 - 버전을 구분할 수 있는 HTTP 요청 헤더를 추가한다.
+- ﻿﻿미디어 타입 버저닝 - 요청에 Accept 헤더를 사용해서 버전을 구분한다.
+
+### URI 버저닝
+
+* /courses/v1 = V1
+* /couses/v2 = V2
+
+### Request Parameter 버저닝
+
+```java
+@RestController
+@RequestMapping("/courses/")
+public class RequestParameterVersioningCourseController {
+
+	@GetMapping(params = "version=v1")
+	@ResponseStatus(code = HttpStatus.OK)
+	public Iterable<Course> getAllLegacyCourses() {
+		return courseService.getCourses();
+	}
+
+	@GetMapping(params = "version=v2")
+	@ResponseStatus(code = HttpStatus.OK)
+	public Iterable<ModernCourse> getAllModernCourses() {
+		return modernCourseRepository.findAll();
+	}
+
+}
+```
+
+```http
+http POST:8080/courses/?version=v1
+--
+http POST:8080/courses/?version=v2
+```
+
+### 커스텀 HTTP 헤더 버저닝
+
+```java
+@RestController
+@RequestMapping("/courses/")
+public class CustomHeaderVersioningCourseController {
+
+	@GetMapping(headers = "X-API-VERSION=v1")
+	@ResponseStatus(code = HttpStatus.OK)
+	public Iterable<Course> getAllLegacyCourses() {
+		return courseService.getCourses();
+	}
+
+	@GetMapping(headers = "X-API-VERSION=v2")
+	@ResponseStatus(code = HttpStatus.OK)
+	public Iterable<ModernCourse> getAllModernCourses() {
+		return modernCourseRepository.findAll();
+	}
+
+}
+```
+
+```shell
+curl -H "X-API-VERSION: v1" http://your-server-address/courses/
+--
+curl -H "X-API-VERSION: v2" http://your-server-address/courses/
+```
+
+### media type(미디어 타입) 버저닝
+
+미디어 타입을 사용하는 버저닝은 콘텐트 협상(content Negotiation) 버저닝 또는 Accept Header 버저닝이라고 부르기도 한다.
+
+ Accept 헤더는 MIME 타입을 사용해서 클라이언트가 받아들일 수 있는 콘텐트 타입을 서버에게 알려줄 수 있다. 클라이언트가 Accept 헤더를 HTTP 요청에 포함하면 서버는 콘텐트 협상(https://developer.mozilla.org/en-US/docs/Web/HTTP/Content_negotiation) 과정에서 내부 알고리듬을 사용해 Accept 헤더에 명시된 타입의 데이터를 반환 하는 API를 호출하고 응답에 Content-Type 헤더를 포함해서 반환한다.
+
+```java
+@RestController
+@RequestMapping("/courses/")
+public class AcceptHeaderVersioningCourseController {
+
+	@GetMapping(produces = "application/vnd.sbip.app-v1+json")
+	@ResponseStatus(code = HttpStatus.OK)
+	public Iterable<Course> getAllLegacyCourses() {
+		return courseService.getCourses();
+	}
+
+
+	@GetMapping(produces = "application/vnd.sbip.app-v2+json")
+	@ResponseStatus(code = HttpStatus.OK)
+	public Iterable<ModernCourse> getAllModernCourses() {
+		return modernCourseRepository.findAll();
+	}
+
+}
+```
+
+```shell
+curl -H "Accept: application/vnd.sbip.app-v1+json" http://your-server-address/courses/
+
+curl -H "Accept: application/vnd.sbip.app-v2+json" http://your-server-address/courses/
+```
+
+
+
+* 많은 개발자가 엔드포인트 URI에 버전 번호를 포함하는 것을 좋아하지 않는다. 버전은 실제 URI의 일부가 아니기 때문에 URI를 오염시킨다고 생각하기 때문이다.
+* 버저닝 목적으로 Accept 헤더를 사용하는 것도 좋아하지 않는데, 원론적으로는 Accept 는 버저닝 목적으로 사용하는 헤더가 아니기 때문이다. 따라서 Accept 헤더를 버저닝에 사용하는 것은 일종의 편법이며 권장할 만한 방식이 아니라고 생각한다
+* 동일한 엔드포인트에 대해 여러 버전의 API가 있다면 API 문서화에도 문제가 생길 수 있다. 동일한 서비스를 호출하는 서로 다른 두 가지 방법이 있다면 API 사용자는 혼란스러울 수밖에 없다.
+
+ 몇 가지 주요 API 제공자들이 선택한 버저닝 전략은 다음과 같다.
+
+- ﻿﻿아마존- HTTP 요청 파라미터 방식
+- ﻿﻿깃허브 ~ 미디어 타입 방식
+- ﻿﻿마이크로소프트~ 커스텀 HTTP 헤더 방식
+- ﻿﻿트위터 - URI 방식
 
 
 
