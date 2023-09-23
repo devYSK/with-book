@@ -1,0 +1,23 @@
+spring:
+  data:
+    mongodb:
+      database: test
+      port: 27017
+
+de:
+  flapdoodle:
+    mongodb:
+      embedded:
+        version: 4.9.0
+
+
+logging:
+  level:
+    org:
+      springframework:
+        boot:
+          autoconfigure:
+            mongo:
+              embedded: debug
+
+    org.mongodb: debug

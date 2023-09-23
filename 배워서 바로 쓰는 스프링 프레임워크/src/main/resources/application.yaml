@@ -1,0 +1,45 @@
+spring:
+  data:
+    mongodb:
+      database: test
+      port: 27017
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/study
+    username: root
+    password: root
+
+de:
+  flapdoodle:
+    mongodb:
+      embedded:
+        version: 4.9.0
+
+
+email:
+  host: smtp.gmail.com
+  port: 587
+  protocol: smtp
+  username: <enter-email-id>
+  password: <enter-email-password>
+
+  subject:
+    request:
+      received: "?? ?? ?? ???"
+      processed: "?? ?? ?? ???"
+  text:
+    request:
+      received: "?? ?? ?? ??? ???????"
+      processed: "?? ?? ?? ??? ???????"
+
+
+logging:
+  level:
+    org:
+      springframework:
+        boot:
+          autoconfigure:
+            mongo:
+              embedded: debug
+
+    org.mongodb: debug
