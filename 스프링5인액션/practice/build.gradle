@@ -31,9 +31,14 @@ dependencies {
     // Jakarta Validation API
     implementation 'jakarta.validation:jakarta.validation-api'
 
+    implementation 'io.projectreactor:reactor-core'
+    testImplementation 'io.projectreactor:reactor-test:3.5.4'
+
+
     // Hibernate Validator (Jakarta Bean Validation 구현체)
     implementation 'org.hibernate.validator:hibernate-validator'
     implementation 'org.springframework.kafka:spring-kafka'
+    testImplementation 'org.projectlombok:lombok:1.18.22'
     compileOnly 'org.projectlombok:lombok'
     runtimeOnly 'com.h2database:h2'
     runtimeOnly 'com.mysql:mysql-connector-j'
