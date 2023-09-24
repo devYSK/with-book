@@ -1,0 +1,28 @@
+version: '3'
+
+services:
+  artemis:
+    container_name: artemis
+    image: kim206gh/apache-artemis:2.17.0
+    ports:
+      - "8161:8161" # Web Console
+      - "61616:61616" # Default port for JMS
+    environment:
+      - ARTEMIS_USER=artemis
+      - ARTEMIS_PASSWORD=artemis
+      - AMQ_EXTRA_ARGS="--nio --host 0.0.0.0 --http-host 0.0.0.0 --relax-jolokia"
+
+  rabbitmq:  # 서비스 이름. 이 이름으로 컨테이너에 접근 가능
+    image: rabbitmq:3-management-alpine  # 사용할 이미지. management 태그는 관리 UI가 포함된 RabbitMQ 이미지
+    container_name: rabbitmq
+    ports:
+      - "15672:15672"  # 관리 UI 포트. 브라우저에서 http://localhost:15672/ 로 접속해서 RabbitMQ 관리 UI 확인 가능
+      - "5672:5672"   # 기본 AMQP 프로토콜 포트. 애플리케이션은 이 포트를 통해 RabbitMQ에 접속
+#    volumes:
+#      - ./.docker/rabbitmq/etc/:/etc/rabbitmq/
+#      - ./.docker/rabbitmq/data/:/var/lib/rabbitmq/
+#      - ./.docker/rabbitmq/logs/:/var/log/rabbitmq/
+    environment:  # 환경 변수 설정
+      RABBITMQ_DEFAULT_USER: admin  # RabbitMQ 로그인 사용자 이름
+      RABBITMQ_DEFAULT_PASS: admin  # RabbitMQ 로그인 비밀번호
+      RABBITMQ_ERLANG_COOKIE: "RabbitMQ-My-Cookies"

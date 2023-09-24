@@ -1,0 +1,21 @@
+spring:
+#  artemis:
+#    mode: native # native mode for embedded broker
+#    user: artemis
+#    password: artemis
+#    broker-url: tcp://localhost:61616
+#  jms:
+#    template:
+#      default-destination: localhost:61616
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: admin
+    password: admin
+    template:
+      exchange: tacocloud.orders
+      routing-key: kitchens.central
+
+  kafka:
+    bootstrap-servers:
+      - localhost:9092
