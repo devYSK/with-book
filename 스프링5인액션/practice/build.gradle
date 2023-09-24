@@ -33,12 +33,14 @@ dependencies {
 
     implementation 'io.projectreactor:reactor-core'
     testImplementation 'io.projectreactor:reactor-test:3.5.4'
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
 
 
     // Hibernate Validator (Jakarta Bean Validation 구현체)
     implementation 'org.hibernate.validator:hibernate-validator'
     implementation 'org.springframework.kafka:spring-kafka'
     testImplementation 'org.projectlombok:lombok:1.18.22'
+    testImplementation 'junit:junit:4.13.1'
     compileOnly 'org.projectlombok:lombok'
     runtimeOnly 'com.h2database:h2'
     runtimeOnly 'com.mysql:mysql-connector-j'

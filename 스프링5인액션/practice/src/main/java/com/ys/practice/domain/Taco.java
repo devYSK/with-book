@@ -30,7 +30,7 @@ public class Taco implements Serializable {
 	
 	@Id
 	@GeneratedValue(strategy= GenerationType.AUTO)
-	private Long id;
+	private String id;
 	
 	private Date createdAt;
 	
