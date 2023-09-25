@@ -1,0 +1,53 @@
+buildscript {
+    repositories {
+        maven {
+            url "https://maven.eveoh.nl/content/repositories/releases"
+        }
+    }
+
+    dependencies {
+        classpath "nl.eveoh:gradle-aspectj:2.0"
+    }
+}
+
+project.ext {
+    aspectjVersion = '1.8.13'
+}
+
+apply plugin: 'java'
+apply plugin: 'eclipse'
+apply plugin: 'application'
+apply plugin: 'aspectj'
+
+mainClassName = "com.apress.springrecipes.calculator.Main"
+
+repositories {
+    mavenCentral()
+}
+
+jar {
+    baseName = "${rootProject.name}"
+    version =  "0.0.1-SNAPSHOT"
+    manifest {
+        attributes "Implementation-Title": "${rootProject.name}",
+                   "Implementation-Version": version,
+                   "Main-Class": "${mainClassName}"
+    }
+}
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+ext {
+    springVersion = '5.0.5.RELEASE'
+}
+
+[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
+
+dependencies {
+    compile "org.springframework:spring-core:${springVersion}"
+    compile "org.springframework:spring-context:${springVersion}"
+    compile "org.springframework:spring-beans:${springVersion}"
+    compile "org.springframework:spring-aspects:${springVersion}"
+    compile "org.slf4j:slf4j-simple:1.7.25"
+}

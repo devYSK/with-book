@@ -1,0 +1,33 @@
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'org.junit.platform:junit-platform-gradle-plugin:1.1.0'
+    }
+}
+
+apply plugin: 'java'
+apply plugin: 'org.junit.platform.gradle.plugin'
+
+repositories {
+    mavenCentral()
+}
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
+
+dependencies {
+    compile "org.slf4j:slf4j-simple:1.7.25"
+    testCompile("junit:junit:4.12")
+    testCompile("org.testng:testng:6.14.2")
+    testCompile("org.junit.jupiter:junit-jupiter-api:5.1.0")
+    testRuntime("org.junit.jupiter:junit-jupiter-engine:5.1.0")
+    testRuntime("org.junit.vintage:junit-vintage-engine:5.1.0")
+}
+
+junitPlatform {
+    details 'tree'
+}

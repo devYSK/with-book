@@ -1,0 +1,31 @@
+plugins {
+    id "org.akhikhl.gretty" version "2.0.0"
+}
+
+apply plugin: 'war'
+apply plugin: 'org.akhikhl.gretty'
+
+repositories {
+    mavenCentral()
+}
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+ext {
+    springVersion = '5.0.5.RELEASE'
+}
+
+[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
+
+dependencies {
+    compile "org.springframework:spring-core:${springVersion}"
+    compile "org.springframework:spring-context:${springVersion}"
+    compile "org.springframework:spring-beans:${springVersion}"
+    compile "org.springframework:spring-webmvc:${springVersion}"
+    compile "org.springframework.social:spring-social-config:1.1.6.RELEASE"
+    compile "org.springframework.social:spring-social-twitter:1.1.2.RELEASE"
+    compile "javax.servlet:jstl:1.2"
+    compile "com.fasterxml.jackson.core:jackson-databind:2.9.3"
+    compile "org.slf4j:slf4j-simple:1.7.25"
+}

@@ -1,0 +1,40 @@
+apply plugin: 'java'
+apply plugin: 'eclipse'
+apply plugin: 'application'
+
+mainClassName = "com.apress.springrecipes.post.FrontOfficeMain"
+
+repositories {
+    mavenCentral()
+}
+
+jar {
+    baseName = "${rootProject.name}"
+    version =  "0.0.1-SNAPSHOT"
+    manifest {
+        attributes "Implementation-Title": "${rootProject.name}",
+                   "Implementation-Version": version,
+                   "Main-Class": "${mainClassName}"
+    }
+}
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+ext {
+    springVersion = '5.0.5.RELEASE'
+}
+
+[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
+
+dependencies {
+    compile "org.springframework:spring-core:${springVersion}"
+    compile "org.springframework:spring-context:${springVersion}"
+    compile "org.springframework:spring-beans:${springVersion}"
+    compile "org.springframework:spring-jms:${springVersion}"
+    compile "org.slf4j:slf4j-simple:1.7.25"
+    compile "javax.jms:javax.jms-api:2.0.1"
+    compile "org.apache.activemq:activemq-client:5.15.3"
+    compile "com.rabbitmq:amqp-client:5.1.2"
+    compile "com.fasterxml.jackson.core:jackson-databind:2.9.3"
+}

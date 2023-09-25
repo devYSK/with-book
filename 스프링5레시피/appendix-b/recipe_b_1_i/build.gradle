@@ -1,0 +1,24 @@
+apply plugin: 'java'
+apply plugin: 'eclipse'
+apply plugin: 'application'
+
+mainClassName = "com.apress.springrecipes.caching.Main"
+
+repositories {
+    mavenCentral()
+}
+
+jar {
+    baseName = "${rootProject.name}"
+    version =  "0.0.1-SNAPSHOT"
+    manifest {
+        attributes "Implementation-Title": "${rootProject.name}",
+                   "Implementation-Version": version,
+                   "Main-Class": "${mainClassName}"
+    }
+}
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
