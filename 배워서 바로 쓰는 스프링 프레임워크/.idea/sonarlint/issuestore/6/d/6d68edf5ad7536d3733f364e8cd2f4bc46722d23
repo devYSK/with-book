@@ -1,0 +1,21 @@
+
+b
+java:S1192C"GDefine a constant instead of duplicating this literal "amount" 3 times.(·„™ÿÿÿÿÿ
+]
+java:S1192A"GDefine a constant instead of duplicating this literal "active" 3 times.(ü¥ƒ
+l
+java:S1192D"QDefine a constant instead of duplicating this literal "fd_creation_date" 3 times.(ë²–©øÿÿÿÿ
+g
+java:S1192*"QDefine a constant instead of duplicating this literal "fixed_deposit_id" 4 times.(ÓúÖ‹
+a
+java:S1192B"KDefine a constant instead of duplicating this literal "account_id" 3 times.(êÅæÃ
+\
+java:S1192G"FDefine a constant instead of duplicating this literal "email" 3 times.(õ”ôÓ
+]
+java:S1192F"GDefine a constant instead of duplicating this literal "tenure" 3 times.(Š‚“Ã
+r
+java:S1488O"\Immediately return this expression instead of assigning it to the temporary variable "fdds".(ÄğÁ 
+r
+java:S1488l"\Immediately return this expression instead of assigning it to the temporary variable "fdds".(ÄğÁ 
+I
+java:S1874,".Remove this use of "<init>"; it is deprecated.(ø¿öğıÿÿÿÿ

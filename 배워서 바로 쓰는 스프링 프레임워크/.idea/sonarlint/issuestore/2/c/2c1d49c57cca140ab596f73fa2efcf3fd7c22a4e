@@ -1,0 +1,9 @@
+
+k
+java:S22598"UA "NullPointerException" could be thrown; "otherBankAccountDetails" is nullable here.(¨†Ïô
+f
+java:S12066"PThis class overrides "equals()" and should therefore also override "hashCode()".(İÆóÍ
+5
+java:S20976"Add a type test to this method.(İÆóÍ
+W
+java:S11268"AReplace this if-then-else statement by a single return statement.(¨†Ïô
