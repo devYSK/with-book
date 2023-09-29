@@ -37,9 +37,6 @@
     - [맵에 대한 이터레이션](#맵에-대한-이터레이션)
     - [in으로 컬렉션이나 범위의 원소 검사](#in으로-컬렉션이나-범위의-원소-검사)
   - [코틀린의 예외 처리](#코틀린의-예외-처리)
-    - [try, catch, finally](#try-catch-finally)
-    - [try를 식으로 사용](#try를-식으로-사용)
-  - [요약](#요약)
 - [3장. 함수 정의와 호출](#3장-함수-정의와-호출)
   - [코틀린에서 컬렉션 만들기](#코틀린에서-컬렉션-만들기)
   - [함수를 호출하기 쉽게 만들기](#함수를-호출하기-쉽게-만들기)
@@ -541,21 +538,81 @@ fun getWarmth(color: Color) = when (color) {
 
 ### when과 임의의 객체를 함께 사용
 
+코틀린에서 when은 자바의 switch보다 훨씬 더 강력하다. 분기 조건에 상수(enum 상수나 숫자 리터럴)만을 사용할 수있는 자바 switch와 달리 코틀린 when의 분기 조건은 임의의 객체를 허용 한다.
 
+```kotlin
+fun mix(c1: Color, c2: Color) =
+    when (setOf(c1, c2)) {
+        setOf(Color.RED, Color.YELLOW) -> Color.ORANGE
+        setOf(Color.YELLOW, Color.BLUE) -> Color.GREEN
+        else -> throw IllegalArgumentException("argument is invalid")
+    }
+```
+
+
+
+c1, c2가 RED, YELLOW라면 그 둘을 혼합한 결과는 ORANGE다. 이를 구현해서 집합 비교를 사용한다.
+
+when의 분기 조건 부분에 `식을` 넣을 수 있기 때문에 많은 경우 코드를 더 간결하고 아름답게 작성 할 수 있다.
 
 ### 인자 없는 when 사용
 
+set 인스턴스를 생성하는 불필요한 비용을 줄이기 위해서 인자가 없는 when 식을 사용할 수 있다.
 
+```kotlin
+fun mix(c1: Color, c2: Color) =
+    when {
+        (c1 == RED && c2 == YELLOW) -> ORANGE
+        (c1 == BLUE && c2 == YELLOW) -> GREEN
+        else -> throw Exception("dirty color")
+    }
+```
 
 ### 스마트 캐스트: 타입 검사와 타입 캐스트를 조합
 
+Expr 인터페이스에는 두 가지 구현 클래스가 존재한다
 
+- 식을 평가하려면 두 가지 경우를 고려해야 한다.
+- 어떤 식이 수라면 그 값을 반환한다
+- 어떤 식의 합계라면 좌항과 우항의 값을 계산 한 뒤 그 두 값을 합한 값을 반환한다.
+
+```kotlin
+interface Expr
+
+classNum(val value: Int) : Expr
+class Sum(val left: Expr, val right : Expr) : Expr
+
+fun eval(e: Expr): Int =
+    when (e) {
+        is Num -> e.value
+        is Sum -> eval(e.right) + eval(e.left)
+        else -> throw IllegalArgumentException("unknown")
+    }
+```
+
+
+
+**어떤 변수나 원하는 타입인자를 일단 is로 검사하고 나면 굳이 변수를 원하는 타입으로 캐스팅 하지 않아도 마치 처음부터 그 변수가 원하는 타입으로 선언된 것처럼 사용할 수 있다.** 
+
+코틀린의 is는 자바의 instanceof와 비슷하다. 하지만 실제로는 자바와 달리  컴파일러가 캐스팅을 수행해준다. 이를 **스마트 캐스트**라고 한다.
 
 ### 리팩토링: if를 when으로 변경
 
-
+코틀린에서는 if가 값을 만들어 내기 때문에 자바와 달리 3항 연산자가 따로 없다 
 
 ### if와 when의 분기에서 블록 사용
+
+```kotlin
+fun eval(e: Expr): Int =
+    when(e) {
+        is Num -> { // 블록으로 사용할 수도 있다.
+            println("hello $e.value")
+            e.value
+        }
+        is Sum -> evalu(e.right) + eval(e.left)
+        else -> throw IllegalArgumentException("Unknown expression")
+    }
+```
 
 
 
@@ -563,19 +620,112 @@ fun getWarmth(color: Color) = when (color) {
 
 ### while 루프
 
+자바와 while은 같다.
+
+for은 for-each만 존재한다. 
+
 ### 숫자에 대한 이터레이션: 범위와 수열
+
+루프의 가장 흔한 용례인 초깃값, 증가 값, 최종 값을 사용한 루프를 대신하기 위해 코틀린에서는 범위를 사용한다. 
+
+범위는 기본적으로 두 값으로 이뤄진 구간이다. 
+
+보통 그 두 값을 정수 등의 숫자 타입이며, `..` 연산자로 시작 값과 끝 값을 연결해서 범위를 만든다.
+
+```kotlin
+fun fizzBuzz(i: Int) = when {
+    i % 15 == 0 -> "FizzBuzz"
+    i % 3 == 0 -> "Fizz"
+    i % 5 == 0 -> "Buzz"
+    else -> "$i"
+}
+
+fun main(args: Array<String>) {
+
+    val oneToTen = 1..10
+
+    println(oneToTen)
+
+    for (i in 1..100){
+        println(fizzBuzz(i))
+    }
+
+    for (i in 100 downTo 1 step 2) { // 증가값 step을 갖는 수열에 대해 이터레이션 
+        println(fizzBuzz())
+    }
+}
+```
+
+* downTo 1은 역방향. 즉 감소에 대해 이터레이션 한다 
+* 스텝은 증가, 감소 값이다. 
 
 ### 맵에 대한 이터레이션
 
+```kotlin
+val binaryReps = TreeMap<Char, String>()
+
+for (c in 'A'..'F') { // A ~ F까지 이터레이션
+    val binary = Integer.toBinaryString(c.toInt()) // 아스키 코드를 2진표현으로 
+    binaryReps[c] = binary // c를 키로 c의 2진 표현을 맵에 put
+}
+
+for ((letter, binary) in binaryReps) { // 맵에 대한 이터레이션, 맵의 키와 값을 두 변수에 각각 대입한다.
+    println("$letter = $binary")
+}
+```
+
+키를 사용해 맵의 값을 가져오거나 키에 해당 하는 값을 넣는 작업인 get(), put()을 사용 하는 대신에
+
+ `map[key]` `[key] = value` 을 사용한다
+
+`구조 분해 할당`
+
 ### in으로 컬렉션이나 범위의 원소 검사
+
+```kotlin
+fun isLetter(c: Char) = c in 'a'..'z' || c in 'A'..'Z'
+
+fun isNotDigit(c: Char) = c !in '0'..'9'
+```
+
+in 연산자를 사용해 어떤 값이 범위에 속하는지 검사할 수 있다. 반대로 !in을 사용하면 어떤 값이 범위에 속하지 않는지 검사 할 수 있다.
+
+```kotlin
+fun reconize(c: Char) = when (c) {
+    in '0'..'9' -> "number" // c 값이 0~ 9 사이 속해있는지 검사
+    in 'a'..'z', in 'A'..'Z' -> "string" // 여러 범위 조건 지정 가능
+    else -> "what ? "
+}
+```
+
+컬렉션도 가능
+
+```kotlin
+println("kotlin" in setOf("java", "Scala"))
+```
 
 ## 코틀린의 예외 처리
 
-### try, catch, finally
+기본적인 사용방법은 자바와 크게 다를 건 없다.
 
-### try를 식으로 사용
+`코틀린은Checked 예외를 반드시 처리할 필요없다` . 자바에서는 반드시 처리하거나 method throws 표시
 
-## 요약
+* 자바에서의 불편함인 `try catch` 으로 감싸고 다음 로직을 이어가는 코드를 작성하는 경우를 없앴다.
+
+- try, throw 같은 키워드가 식(Expression)으로 취급되어서 다른 식에 포함이 가능하다
+
+```kotlin
+fun readNumber(reader: BufferedReader): Int?{
+    try {
+        val line = reader.readLine()
+        return Integer.parseInt(line)
+    } catch (e: NumberFormatException){
+        return null
+    } finally {
+        reader.close()
+    }
+}
+```
 
 
 # 3장. 함수 정의와 호출
