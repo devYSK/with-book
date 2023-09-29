@@ -86,22 +86,12 @@
     - [람다와 컬렉션](#람다와-컬렉션)
     - [람다 식의 문법](#람다-식의-문법)
     - [현재 영역에 있는 변수에 접근](#현재-영역에-있는-변수에-접근)
-    - [멤버 참조](#멤버-참조)
-  - [컬렉션 함수형 API](#컬렉션-함수형-api)
-    - [필수적인 함수: filter와 map](#필수적인-함수-filter와-map)
-    - [all, any, count, find: 컬렉션에 술어 적용](#all-any-count-find-컬렉션에-술어-적용)
-    - [groupBy: 리스트를 여러 그룹으로 이뤄진 맵으로 변경](#groupby-리스트를-여러-그룹으로-이뤄진-맵으로-변경)
-    - [flatMap과 flatten: 중첩된 컬렉션 안의 원소 처리](#flatmap과-flatten-중첩된-컬렉션-안의-원소-처리)
   - [지연 계산 lazy 컬렉션 연산](#지연-계산-lazy-컬렉션-연산)
     - [시퀀스 연산 실행: 중간 연산과 최종 연산](#시퀀스-연산-실행-중간-연산과-최종-연산)
     - [시퀀스 만들기](#시퀀스-만들기)
-  - [자바 함수형 인터페이스 활용](#자바-함수형-인터페이스-활용)
-    - [자바 메소드에 람다를 인자로 전달](#자바-메소드에-람다를-인자로-전달)
-    - [SAM 생성자: 람다를 함수형 인터페이스로 명시적으로 변경](#sam-생성자-람다를-함수형-인터페이스로-명시적으로-변경)
   - [수신 객체 지정 람다: with와 apply](#수신-객체-지정-람다-with와-apply)
     - [with함수](#with함수)
     - [apply함수](#apply함수)
-  - [요약](#요약)
 - [6장. 코틀린 타입 시스템](#6장-코틀린-타입-시스템)
   - [널 가능성](#널-가능성)
     - [널이 될 수 있는 타입](#널이-될-수-있는-타입)
@@ -1735,33 +1725,163 @@ val listener = object : MouseAdapter() {
 
 # 5장. 람다로 프로그래밍
 
+람다 식(lambda expression) 또는 람다는 기본적으로 다른 함수에 넘길 수 있는 작은 코드 조각 을 뜻한다. 람다를 사용하면 쉽게 공통 코드 구조를 라이브러리 함수로 뽑아낼 수 있다
+
 ## 람다 식과 멤버 참조
+
+
 
 ### 람다 소개: 코드 블록을 함수 인자로 넘기기
 
-### 람다와 컬렉션
+클래스를 선언하고 그 클래스의 인스턴스를 함수에 넘기는 대신, `함수형 언어`에서는 `함수를 직접 다른 함수에 전달`할 수 있다. 
+
+이를 람다 식을 사용하여 함수를 선언하지 않고, 코드 블록을 직접 함수의 인자로 전달하여 결과를 만들어 낼 수 있다.
+
+```kotlin
+button.setOnClickListener { 람다~ } // 람다를 넘긴다
+```
 
 ### 람다 식의 문법
 
+**람다를 따로 선언해서 변수에 저장할 수도 있다. 하지만 함수에 인자로 넘기면서 바로 람다를 정의하는 경우가 대부분이다.**
+
+```kotlin
+{x: Int, y: int -> x + y}
+
+x: Int, y: int  =  파라미터
+x + y  =  본문
+```
+
+```kotlin
+people.maxBy({ p: Person -> p.age })
+```
+
+중괄호 안에 있는 코드는 람다 식이고 람다 식을 maxBy에 넘긴다. 
+
+코틀린에서는 함수 호출 시 맨 뒤에 있는 인자가 람다 식이라면 그 람다를 괄호 밖으로 뺼 수 있다.
+
+```kotlin
+people.maxByo() {p: Person -> p.age}
+```
+
+또한 다음처럼 파라미터 타입도 제거하고 컴파일러 추론에 맡길수도 있다.
+
+```kotlin
+person.maxBy { p -> p.age}
+```
+
+변수에 람다를 저장할 때는 파라미터 타입을 추론할 문맥이 존재하지 않으므로 타입을 명시해줘야 한다
+
+
+
 ### 현재 영역에 있는 변수에 접근
 
-### 멤버 참조
+람다 함수 안에서 정의하면 함수의 파라미터뿐 아니라 람다 정의의 밖에서 선언된 로컬 변수까지 람다에서 모두 사용할 수 있다.
 
-## 컬렉션 함수형 API
+```kotlin
+fun printProblemCounts(responses: Collection<String>) {
+    var clientErrors = 0 // 람다에서 사용할 변수를 정의한다.
+    var serverErrors = 0 // 람다에서 사용할 변수를 정의한다.
 
-### 필수적인 함수: filter와 map
+    responses.forEach {
+        if (it.startsWith("4")) {
+            clientErrors++ // 람다 안에서 람다 밖의 변수를 변경한다.
+        } else if (it.startsWith("5")) {
+            serverErrors++ // 람다 안에서 람다 밖의 변수를 변경한다.
+        }
+    }
 
-### all, any, count, find: 컬렉션에 술어 적용
+    println("$clientErrors client errors, $serverErrors server errors")
+}
+```
 
-### groupBy: 리스트를 여러 그룹으로 이뤄진 맵으로 변경
+- 람다 안에서 `바깥 함수의 로컬 변수 변경`
+  - 람다 안에서 사용하는 외부 변수를 람다가 `포획한 변수(chapture)`라 부른다.
+  - 일반적으로 함수 안에 정의된 로컬 변수의 생명주기는 함수가 반환되면 끝이 난다.
+  - 하지만 어떤 함수가 자신의 `로컬 변수를 포획한 람다를 반환`하거나 `다른 변수에 저장`하게 되면 `로컬 변수의 생명주기`와 `함수의 생명주기`가 달라질 수 있다.
 
-### flatMap과 flatten: 중첩된 컬렉션 안의 원소 처리
+코틀린은 자바와 달리 람다 밖의 파이널이 아닌 변수에 접근할 수 있고 변경도 가능하다. (자바는 파이널, 또는 이펙티브 파이널 이여야 한다)
+
+파이널이 아닌 변수를 포획한 경우 변수를 특별한 래퍼로 감싸, 나중에 변경하거나 읽을 수 있게 한 다음, 래퍼에 대한 참조를 람다 코드와 함께 저장한다.
+
+> 원리
+>
+> 교모한 속임수를 통해 변경 가능한 변수를 포획(캡쳐)할 수 있다. 
+> **그 속임수는 변경 가능한 변수를 저장하는 원소가 단 하나뿐인 배열을 선언하거나, 변경 가능한 변수를 필드로 하는 클래스를 선언하는 것이다.**
+
+```kotlin
+class Ref<T> (val value: T) // 변경 가능한 변수를 포획하는 방법을 보여주기 위한 클래스
+
+>>> val count = Ref(0) 
+>>> val inc = { counter.Value++ } // 공싱적으로 변경 불가능한 변수를 포홱했지만 그 변수가 가리키는 객체의 멤버 필드 값을 바꿀수 있다.
+```
+
+* 람다가 val을 포획하면 값을 복사한다.
+* var를 포획하면 Ref라는 클래스 인스턴스 내부 필드에 넣은 후, Ref라는 인스턴스에 대한 참조를 파이널로 만든다.
+  * 일종의 Wrapper인것이다. 람다 안에서는 Ref 인스턴스 내부의 필드를 변경 가능한것이다. 
+
+주의할점은, 이벤트 핸들러나 다른 비동기 코드에서는 제대로 동작하지 않을수도 있다. 
+
+핸들러나 람다가 외부 메소드가 끝난 이후에 호출되면, 지역변수(멤버변수)가 반환되기 때문이다.
 
 ## 지연 계산 lazy 컬렉션 연산
 
 ### 시퀀스 연산 실행: 중간 연산과 최종 연산
 
+map과 filter는 내부적으로 결과 컬렉션을 즉시 생성, 이는 컬렉션 함수를 연쇄하게 되는 경우 매 단계마다 계산 중간 결과를 새로운 컬렉션에 임시로 담게된다.
+
+즉 map().filter 하게 되면 리스트를 2개 만들어 메모리 낭비하는 문제가 생길 수 있다.
+
+이때 각 연산이 컬렉션을 직접 1개만 사용하도록 sequence 를 사용하게 만들 수 있다.
+
+Sequence안에는 iterator라는 단 하나의 메서드가 존재하여, 해당 메서드를 통해 시퀀스로부터 원소 값을 얻을 수 있다.
+
+Sequence 인터페이스의 강점은 그 인터페이스 위에 구현된 연산에 계산을 수행하는 방법 때문에 생긴다. 시퀀스는 원소를 필요할 때 비로소 계산하여, 중간 처리결과를 저장하지 않고도 연산을 연쇄적으로 적용하여 효율적으로 계산을 수행할 수 있다.
+
+asSequence 확장함수는 어떤 컬렉션이든 시퀀스로 변환하는 것이 가능하다. 시퀀스를 리스트로 변환하기 위해서는 toList를 사용한다.
+
+> 큰 컬렉션에 대해서 연산을 연쇄하려는 경우 시퀀스를 사용하는 것을 규칙으로 삼아라
+
+```kotlin
+people.asSequence()
+	.map {}
+  .filter {}
+  .toList()
+```
+
 ### 시퀀스 만들기
+
+시퀀스에 대한 연산은 중간(intermediate) 연산과 최종(terminal) 연산으로 나뉜다. 중간 연산은 다른 시퀀스를 반환하고, 최종 연산은 결과를 반환한다
+
+중간 연산은 항상 지연(lazy) 계산되고, 최종 연산을 호출하면 비로소 연기되었던 모든 계산이 수행된다.
+
+**컬렉션 사용과 시퀀스 사용의 동작 방식차이**
+
+- 즉시 계산은 전체 컬렉션에 연산을 적용하지만 지연 계산은 원소를 한번에 하나씩 처리한다，
+
+```kotlin
+val people = listOf(
+		Person("Alice", 29), 
+		Person("Bob", 31), 
+		Person("Charles", 31), 
+		Person("Dan", 21)
+	)
+
+people.asSequence() // map 이후 filter 수행
+        .map(Person::name) // 모든 원소에 대한 변환을 수행
+        .filter { it.length < 4 }
+        .toList();
+
+people.asSequence() // filter 이후 map 수행
+        .filter { it.length < 4 } // 부적절한 원소를 먼저 제외
+        .map(Person::name)
+        .toList();
+```
+
+* 예를들어, 위 예제에서 나이가 31인 사람 이름을 모두 대문자로 변경해야 한다면 map -> filter보다 filter -> map 순서가 성능에 더 좋다.
+* 왜냐하면 filter로 2개 (bob, charles)만 걸러내고 변환을 수행하면 되기 때문이다. map->filter는 모두 바꾸고 나서 필터 처리한다.
+
+코틀린의 시퀀스 개념은 자바 스트림의 개념과 같다. 
 
 ## 자바 함수형 인터페이스 활용
 
@@ -1771,11 +1891,136 @@ val listener = object : MouseAdapter() {
 
 ## 수신 객체 지정 람다: with와 apply
 
+코틀린의 표준 라이브러리 with와 apply의 기능인 수신 객체 지정 람다에 대해 이해한다. 
+
+수신 객체 지정 람다(lambda with receiver)란, 수신 객체를 명시하지 않고, 람다의 본문 안에서 다른 객체의 메서드를 호출하는 것을 말한다.
+
 ### with함수
+
+- 알파벳을 만드는 일반적인 코드
+
+```kotlin
+fun alphabet(): String {  
+    val result = StringBuilder()  // StringBuilder 객체를 생성
+    for (letter in 'A'..'Z') {  
+         result.append(letter)  // 생성된 StringBuilder 객체에 append
+    }    result.append("\nNow I know the alphabet!")  
+    return result.toString()  // StringBuilder로 만든 String 결과를 반환
+}  
+  
+fun main(args: Array<String>) {  
+    println(alphabet())  
+}
+```
+
+* 매번 result를 반복 사용하는 단점이 있다. 
+
+코틀린에는 함수 호출 시 맨 뒤에 있는 인자가 람다 식이라면 그 람다를 괄호 밖으로 빼낼 수 있다는 문법 관습이 존재한다. 
+
+람다를 밖으로 빼낼 수도 있고, 람다를 괄호 안에 유지해서 함수의 인자임을 분명히 할 수도 있다.
+
+ 둘 이상의 람다를 인자로 받는 경우 인자 목록의 맨 마지막 람다만 밖으로 뺄 수 있다.
+
+`with`**를 활용하여 개선한 코드**
+
+```kotlin
+fun alphabet(): String {  
+    val stringBuilder = StringBuilder()  
+    return with(stringBuilder) {  // 메서드를 호출하려는 수신 객체를 지정
+        for (letter in 'A'..'Z') { 
+            this.append(letter)  // this를 명시하여 수신 객체의 메서드를 호출
+        }  
+      
+        append("Now I know the alphabet!")  
+        this.toString()  
+    }  
+}
+
+fun main(args: Array<String>) {  
+    println(alphabet())  
+}
+```
+
+with는 실제로 파라미터가 2개있는 함수다
+
+* 첫번째 파라미터는 수신객체(사용할 객체)
+* 두번째 파라미터는 람다이다.
+
+인자 값의 마지막에 람다가 있는 경우 밖으로 빼내는 방식으로 작성이 가능하므로 
+
+with는 `첫 번째 인자로 받은 객체`를 두 번째 인자로 받은 람다의 `수신 객체`로 만든다.
+
+`수신 객체 지정 람다`와 `확장 함수` 비교
+
+- 확장 함수 안에서 this는 그 함수가 확장하는 타입의 인스턴스를 가리킨다.
+- 수신 객체 this의 멤버를 호출할 때는 this.를 생략할 수 있다.
+- 확장 함수와 수신 객체 지정 함수의 관계
+  - 일반 함수 - 확장 함수
+  - 일반 람다 - 수신 객체 지정 람다
+- with와 식을 본문으로 하는 함수를 활용하는 사례
+  - StringBuilder의 인스턴스를 만들고 즉시 with에게 인자로 넘기고, 람다 안에서 this를 사용해 그 인스턴스를 참조한다.
+
+```kotlin
+fun alphabet() = with(StringBuilder()) {  
+    for (letter in 'A'..'Z') {  
+        append(letter)  // this 생략. this는 StringBuilder
+    }    
+    append("\nNow I know the alphabet!")  // this 생략
+    toString()   // this 생략
+}  
+  
+fun main(args: Array<String>) {  
+    println(alphabet())  
+}
+```
+
+**메서드 이름 충돌 문제**
+
+alphabet함수가 OuterClass의 메서드라할 때, StringBuilder가 아닌 바깥쪽 클래스(OuterClass)에 정의된 toString을 호출하고 싶다면 `this@OuterClass.toString()`을 사용해야 한다.
+
+
 
 ### apply함수
 
-## 요약
+with와 비슷하지만, 결과값 대신 수신 객체가 필요한 경우에 사용한다.
+
+* 즉 넘긴 객체를 반환하는것이다
+
+아래 코드의 실행 결과는 StringBuilder 객체로 해당 객체의 toString을 호출하여 String 객체를 얻을 수 있다.
+
+```kotlin
+fun alphabet() = StringBuilder().apply {  
+    for (letter in 'A'..'Z') {  
+        append(letter)  
+    }    append("\nNow I know the alphabet!")  
+}.toString()  
+  
+fun main(args: Array<String>) {  
+    println(alphabet())  
+}
+```
+
+apply 함수는 객체의 인스턴스를 만들면서 즉시 프로퍼티 중 일부를 초기화해야 하는 경우 유용하다.
+
+* 자바에서는 보통 builder 객체가 이런 역할을 담당한다. 
+
+- buildString을 사용하여 리펙토링
+  - buildString은 alphabet 코드에서 StringBuilder 객쳬를 만드는 일과 toString을 호출해주는 일을 알아서 해준다.
+  - buildString의 인자는 수신 객쳬 지정 람다며, 수신 객쳬는 항상 StringBuilder가 된다.
+
+```kotlin
+fun alphabet() = buildString {  
+    for (letter in 'A'..'Z') {  
+        append(letter)  
+    }    append("\nNow I know the alphabet!")  
+}  
+  
+fun main(args: Array<String>) {  
+    println(alphabet())  
+}
+```
+
+
 
 
 # 6장. 코틀린 타입 시스템
@@ -1784,56 +2029,421 @@ val listener = object : MouseAdapter() {
 
 ### 널이 될 수 있는 타입
 
+`String?, Int?, MycustomType?` 등 어떤 타입이든 타입 이름 뒤에 물읖표를 붙이면 그 타입의 변수나 프로퍼티에 null 참조를 저장할 수 있다는 뜻이다.
+
+- 코틀린의 nullable 타입과 스마트 캐스팅등을 이용하여 Null을 안전하게 사용할 수 있다.
+
+```kotlin
+// Tip. 타입이 맞지않으면 컴파일 시점에 Type Mismatch 에러가 발생한다.
+fun foo(): String = null // 컴파일 에러. 대입 불가
+fun bar(): String? = null // 대입 가능
+```
+
 ### 타입의 의미
+
+**타입은 분류로 ... 타입은 어떤 값이 가능한지와 그 타입에 대해 수행할 수 있는 연산의 종류를 결정한다**
 
 ### 안전한 호출 연산자: "?."
 
+코틀린에서 제공하는 가장 유용한 도구 중 하나가 안전한 호출 연산자인 `?.`이다. **`?.`은 null 검사와 메서드 호출을 한 번의 연산으로 수행한다.**
+
+호출하려는 값이 null이 아니라면 `?.`은 일반 메서드 처럼 작동한다. 호출하려는 값이 null이면 이 호출은 무시되고 null이 결과 값이 된다.
+
+```kotlin
+foo?.bar() // foo가 null이 아니면 bar()를 실행, foo == null 이면 null을 반환
+```
+
 ### 엘비스 연산자 "?:"
+
+코틀린은 null 대신 사용할 디폴트 값을 지정할 때 편리하게 사용할 수있는 연산자를 제공한다. 그 연산자를 엘비스 연산자라고 한다.
+
+```kotlin
+fun foo(s: String?){
+    val t: String = s ?: "" // `s`가 null이면 빈문자열 
+}
+
+fun strLenSafe(S: String?): Int = s?.length ?: 0
+```
+
+
+
+코틀린에서는 return이나 throw 등의 연산자도 식이다. **따라서 엘리스 연산자의 우항에 return, throw 등의 연산을 넣을 수 있고, 엘비스 연산자를 더욱 편리하게 사용할 수 있다.** 그런 경우 엘비스 연산자의 좌항이 널이면 함수가 즉시 어떤 값을 변환하거나 예외를 던진다.
+
+```kotlin
+fun findById(id: Long) ?: User
+
+fun someMethod(id: Long) {
+  findById(id) ?: throw IllegalArgumentException()
+}
+```
 
 ### 안전한 캐스트: as?
 
+코틀린에서는 타입캐스팅을 하고 싶다면 연산자 as 를 사용하면 된다.
+
+**`as?`는 값을 대상 타입으로 변환할 수 었으면 null을 리턴한다.** 즉 타입 캐스트 연산자는 값을 주어진 타입으로 변환하려 시도하고 타입이 맞지 않으면 null을 반환한다. 이 패턴은 equals를 구현할 때 유용하다.
+
+```kotlin
+class Person2(val firstName: String, val lastName: String) {
+  override fun equals(o: Any?): Boolean {
+      val otherPerson = o as Person2 ?: return false // 타입이 서로 일치하지 않으면 false를 반환한다.
+        
+      // 안전한 캐스트를 하고 나면 otherPerson이 Person 타입으로 스마트 캐스트 된다.
+      return otherPerson.firstName == firstName && otherPerson.lastName == lastName; 
+  }
+}
+```
+
 ### 널 아님 단언: !!
+
+널 아님 단언은 코틀린에서 타입의 값을 다룰 때 사용할 수있는 도구이다.
+
+ **`!!`으로 사용하면 어떤 값이든 널이 될 수 없는 타입으로(강제로) 바꿀 수 있다. 실제 널에 대해서 !!를 적용하면 NPE가 발생한다.**
+
+```kotlin
+fun ignoreNulls(s: String?) {
+    val sNotnull: String = s!! // 예외는 이 지점을 가리킨다.
+    print(sNotnull.length)
+}
+```
+
+`sNotnull.length` NPE이 발생할거 같지만 컴파일러는 `!!`는 `나는 이 값이 null이 아님을 잘알 고 있어, 내가 잘못 생각했다면 예외가 발생해도 감수하겠다`라고 말하는 것이다.
 
 ### let함수
 
+아주 유용하다.
+
+let 함수를 사용하면 널이 될수 있는 식을 더 쉽게 다룰 수 있다. 
+
+let 함수를 안전한 호출 연산자와 함께 사용하면 원하는 식을 평가해서 결과가 널인지 검사한 다음에 그결과를 변수에 넣을 작업을 간단한 식을 사용해 한꺼번에 처리할 수 있다.
+
+기존 반환값을 함수 체이닝하여 사용할 떄 유용하다.
+
+`**let을 사용하는 가장 흔한 용례는 널이 될 수 있는 값을 널이 아닌 값만 인자로 받는 함수에 넘기는 경우다.**`
+
+```kotlin
+fun sendEmailTo(email: String) {...} // 이 함수는 널이 될수 있는 타입의 값을 넘길 수 없다.
+
+// 인자를 넘기기 전에 주어진 값이 널인지 검사 해야한다.
+if (email != null)  { 	
+	sendtoEmail(email)
+}
+
+email?.let { sendEmailTo(it) } // good
+```
+
+let 함수는 자신의 수신 객체를 인자로 전달받은 람다로 넘기는데, 
+수신 객체가 null이 아닌 경우에만 함수를 실행하며 널이 될 수 없는 타입(!!)으로 바꿔서 던진다. 
+
+ let을 중첩 시키면 코드가 복잡해져서 알아보기 어려운 경우 일반적인 if를 사용해 모든 값을 한꺼번에 검사하는 편이 낫다.
+
 ### 나중에 초기화할 프로퍼티
+
+`lateinit` 
+
+**코틀린에서 클래스 안의 널이 될 수 없는 프로퍼티를 생성자 안에서 초기화하지 않고 특별한 메서드 안에서 초기화할 수 없다.**
+
+코틀린에서는 일반적으로 생성자에서 모든 프로퍼티를 초기화해야 한다.
+
+때문에, 초기화 값을 제공할 수 없으면 널이 될 수 있는 타입을 사용할 수밖에 없는 문제가 생긴다
+
+**이런 문제를 해결하기 위해 프로퍼티를 `lateinit` 변경자를 붙이면 프로퍼티를 나중에 초기화할 수 있다.**
+
+```kotlin
+class MyTest {
+    private lateinit var myService: Myservice? = null // 초기화하지 않고 널이 될수 없는 프로퍼티를 선언한다.
+    
+    @Before 
+    fun setUp() {
+        myService = MyService() // setUp 메서드 안에서 진짜 초깃값을 지정한다.
+    }
+
+    @Test 
+    fun testAction() {
+        Assert.assertEquals("foo", myService.performAction()) // 널 감사를 수행하지 않고 프로퍼티를 사용한다.
+    }
+}
+```
+
+* **나중에 초기화하는 프로퍼티는 항상 var 여야 한다**
 
 ### 널이 될 수 있는 타입 확장
 
+어떤 메소드를 호출하기 전에, 수신 객체역할을 하는 변수가 null이 될수 없다고 보장하면 
+확장 함수인 메소드가 알아서 null을 처리해준다. 
+
+```kotlin
+fun verifyUserInput(input: String?) {
+    if(input.isNullOrBlank()) { // 안전한 호출을 하지 않아도 된다.
+        println("Please fill in the required fields")
+    }
+}
+```
+
+**안전한 호출 없이도 널이 될 수 있는 수신 객체 타입에 대해 선언된 확장 함수를 호출 가능하다.**
+
+```kotlin
+fun String?.isNullOrBlank(): Boolean =  // 널이 될 수 있는 String의 확장
+    this == null || this.isBlank() // 두번째 this에는 스마트 캐스트가 적용 된다.
+```
+
+함수 내부에서는 this는 null이 될 수 있으므로  명시적으로 null 여부를 검사해야한다. 
+**자바에서는 메서드 안에 this는 그 메서드가 호출된 수신 객체를 가리키므로 항상 널이 아니다. **
+**코틀린에서는 null이 될 수 있는 타입의 확장 함수 안에서는 this가 널이 될 수 있다는 점이 자바와 다르다.**
+
+즉 자바코드로는 다음처럼 바뀐다
+
+```java
+public final class ExtensionFunctionsKt {
+    public static final boolean isNullOrBlank(String $receiver) {
+        return $receiver == null || $receiver.isBlank();
+    }
+}
+
+// 확장함수를 호출하는쪽
+
+public static void verifyUserInput(String input) {
+    if (ExtensionFunctionsKt.isNullOrBlank(input)) {
+        System.out.println("Please fill in the required fields");
+    }
+}
+```
+
+> 확장함수 팁
+>
+> 초기에는 널이 될 수 없는 타입에 대해 정의하고, 나중에 대부분 널이 될 수 있는 타입을 인지하고 널을 제대로 처리하게 되면 
+> 안전하게 널이 될 수 있는 타입에 대해 처리할 수 있다. 
+
 ### 타입 파라미터의 널 가능성
 
+코틀린에서는 함수나 클래스의 모든 타입 파라미터는 기본적으로 널이 될 수 있다. 
+`널이 될 수 있는 타입을 포함하는 어떤 타입이라도 타입 파라미터를 대신할 수 있다.`
+
+```kotlin
+fun <T> printHashCode(t: T){ // `t`가 null이 될수 있으므로 
+    printlng(t?.hashCode()) // null에 안전한 호출을 써야 한다.
+}
+
+>>> printHashCode(null)
+null
+```
+
+* t: T는 ?가 붙어있진 않지만, t는 null을 받을 수 있다.
+* 왜냐하면 T의 타입은 Any? 로 추론되기 때문이다.
+
+타입 파라미터가 null이 아님을 확신을 하려면, 타입 상한(upper bound)를 지정해야한다.
+`<T: Any>`
+
+```kotlin
+fun <T: Any> printHashCode(t: T) { // 이제 `T`는 널이 될 수 없는 타입이다.
+    println(h.hashCode())
+}
+
+printHashCode(null) // 이 코드는 컴파일되지 않는다.
+```
+
+
+
 ### 널 가능성과 자바
+
+자바와 코틀린을 조합하면 null에 대한 검사에 대한 방법을 알아보자.
+
+**첫째로 자바 코드에 애노테이션을 활용하는 방법이다 `@Nullable String`은 코틀린 쪽에서 볼 때 `String?`와 같고 자바의 `@NotNull String`은 코틀린쪽에서 볼때 `String`과 같다. 이렇게 JSR-304표준 애노테이션을 활용하는 방법이다.**
+
+```java
+javax.annotation
+
+public @interface NotNull { ... }
+
+public @interface Nullable { ... }
+```
+
+```
+@Nullable + Type = Type?
+@NotNull + Type = Type
+```
+
+* javax, jakarta, org.jetbrains.annotations 등이 코틀린이 이해할 수 있는 널 가능성 어노테이션이다.
+
+### 플랫폼 타입
+
+플랫폼 타입은 코틀린이 null 관련 정보를 알 수 없는 타입을 말한다. 
+
+해당 타입들은 null이 될수있는 타입 또는 null이 될 수 없는 타입으로 처리해도 상관 없다
+
+> 이는 NPE가 발생하는건 순전히 개발자 책임으로 본다는 뜻이다.
+
+#### 코틀린은 왜 플랫폼 타입을 도입했을까?
+
+코틀린의 플랫폼 타입은 자바와의 상호 운용성 때문에 도입된 특별한 타입
+
+코틀린이 자바 라이브러리와 상호 작용할 때, 이러한 널 여부를 확실하게 알 수 없기 때문이다 
 
 ## 코틀린의 기본 타입
 
 ### 기본 타입: Int, Boolean 등
 
+자바는 원시 타입과 참조 타입으로 구분한다. 원시 타입의 변수에는 그 값을 직접 들어가지만, 참조 타입의 변수에는 메모리상의 객체 위치가 들어간다.
+
+원시 타입과 참조 타입이 같다면 항상 객체로 표현하는 경우 비효율 적일것이다. 
+
+코틀린은 그러지 않는다.
+
+**실행 시점에 숫자 타입은 가능한 가장 효율적인 방식으로 표현된다.** 
+
+대부분의 경우 코틀린의 Int 타입은 자바 int 타입으로 컴파일된다. 
+
+**이런 컴파일이 불가능한 경우가 있는데, 컬렉션과 같은 제네릭 클래스를 사용하는 경우뿐이다.**
+
+Int?는 원시타입이 될 수 없고, Int는 원시타입이 될 수 있다. 
+
+반대로 int는 Int가 될 수 있지만 Int?는 될 수 없다 
+
 ### 널이 될 수 있는 기본 타입: Int?, Boolean? 등
 
 ### 숫자 변환
 
+코틀린에서는 Long - Int - Double 등이 자동으로 캐스팅 되지 않는다.
+
+```kotlin
+val i = 1
+val lo: Long = i // 타입이 다르므로 Error: type mismatch 가 런타임에 발생한다.
+println(i == lo) // Compile Error: Op '==' cannot be applied to 'Int' and 'Long'
+```
+
+
+
+변환이 필요하다면 아래와 같이 명시적으로 호출해주어야한다.
+
+```kotlin
+val i = 1
+val lo1: Long = i.toLong() // toLong()에서 변환에 실패한 경우 type mismatch 가 발생한다.
+val loNull: Long? = i.toLongOrNull() // 변환에 실패한 경우 null 을 반환한다.
+```
+
 ### Any, Any?: 최상위 타입
+
+자바에서는 `Object`가 클래스 계층 최상위 타입이듯 **코틀린에서는 `Any`가 타입이 모든 널이 될 수 없는 타입의 최상위 타입이다.**
+
+코틀린에서 모든 객체는 Any 를 상속받는다. `자바의 Object와 같다.`
+
+**`Any`가 널이 될수 없는 타입에 유의하라.** 코틀린에서 널을 포함하는 모든 값을 대입할 변수를 선언하면 `Any?` 타입을 사용해야 한다.
 
 ### Unit 타입: 코틀린의 void
 
+코틀린에서 void는 존재하지 않고, `Unit` 타입이 존재한다.
+`Unit`은 함수가 정상적으로 종료됨을 의미하며 함수에서 아무것도 반환하지 않으면 Unit 타입이 반환된다.
+
+**Unit 타입에 속한 값은 단 하나뿐이며 그 이름도 Unit이다.** 
+다음과 같은 제네릭 파라미터를 반환하는 함수를 오버라이드하면서 반환 타입으로 Unit을 쓸 때 유용하다.
+
+```kotlin
+interface Processor<T> {
+    fun processor(): T
+}
+
+class NoResultProcessor: Processor<Unit> { // `Unit`을 반환하지만 타입을 지정할 필요는 없다.
+    override fun process() {
+        // 업무처리 코드, 여기서 코드에서는 return을 명시할 필요가 없다.
+    }
+}
+```
+
+Unit를 명시적으로 반환할 필요없이 컴파일러가 묵시적으로 `return Unit`을 넣어준다.
+
 ### Nothing 타입: “이 함수는 결코 정상적으로 끝나지 않는다.”
+
+<img src="./images/nothing-any.jpeg">
+
+테스트 라이브러리들은 fail이라는 함수를 제공하는 경우가 많다. 
+
+fail 특별한 메세지가 들어 있는 예외를 던져 현재 테스트를 실패시킨다. 
+무한루프를 도는 코드도 마찬가지다. 정상적으로 끝나지 않는다.
+
+함수가 정상적으로 끝나지 않는다는것을 표현하기 위해 코틀린에는 Nothing이라는 특별한 반환 타입이 있다.
+
+```kotlin
+fun faul(message: String): Nothing {
+    throw IllegalStateException(message)
+}
+
+fail("Error...")
+java.lang.IllegalArgumentException: Error occurred
+```
+
+`Nothing` 타입은 아무 값도 포함하지 않는다. 컴파일러는 `Nothing` 이 반환 타입 함수가 결코 정상 종료되지 않음을 알고 그 함수를 호출하는 코드를 분석할 때 사용한다.
+
+이렇게 Nothing 타입을 별도로 둔 이유는, 코틀린에서는 아래와 같이 구문이 아닌 식(`Expression`)을 사용하는 경우가 많기 때문이다.
+
+```kotlin
+val a = if(isBook()) "book" else "item" // if-else 를 식으로 사용 
+
+fun sum(a:Int, b:Int) : Int = a + b // 함수를 식으로 선언
+```
+
+
+
+이럴 때 식(`Expression`)에서 예외가 터진 경우, 할당하는 값에 `Nothing`타입을 넣어서 컴파일 예외를 명시적으로 만들어주는 용도이다.
+
+```kotlin
+val value: Int = nullableValue?.toInt() ?: return // value 는 Nothing 타입이 될 수 있다.
+```
+
+
+
+
 
 ## 컬렉션과 배열
 
 ### 널 가능성과 컬렉션
 
+<img src="./images/img.png">
+
+`List<Int?>`는 `Int?` 타입의 값을 저장할 수 있다. 즉  `Int`, `null`을 지정할 수 있다.
+
+null이 될 수 있는 값으로 이뤄진 null이 될 수 있는 리스트를 정의 할 때는 물음표 2개를 사용한다. `List<Int?>?`
+
 ### 읽기 전용과 변경 가능한 컬렉션
 
-### 코틀린 컬렉션과 자바
+코틀린에서는 컬렉션안의 데이터에 접근하는 인터페이스와 컬렉션 안의 데이터를 변경하는 인터페이스를 분리 했다는 것이다. (`kotlin.collection.Collection`, `kotlin.collection.MutableCollection`)
 
-### 컬렉션을 플랫폼 타입으로 다루기
+* 자바와의 상호 호환성을 위해서인 이유도 있다.
+
+| 컬렉션 | 변경 불가능 (읽기전용) | 변경 가능 (가변)                                  | 타입 예제                   |
+| ------ | ---------------------- | ------------------------------------------------- | --------------------------- |
+| List   | listOf                 | mutableListOf, arrayListOf                        | List<T>, MutableList<T>     |
+| Set    | setOf                  | mutableSetOf, hashSetOf, linkedSetOf, sortedSetOf | Set<T>, MutableSet<T>       |
+| Map    | mapOf                  | mutableMapOf, hashMapOf, linkedMapOf, sortedMapOf | Map<K, V>, MutableMap<K, V> |
+
+**코드에서는 가능하면 항상 읽기 전용 인터페이스를 사용하는 것을 일반적인 규칙으로 삼아라. **
+
+**val var 구별과 마찬가지로 컬렉션의 읽기 전용 인터페이스와 변경 가능 인터페이스를 구별하는 이유는 프로그램에서 데이터에 어떤 일이 벌어지는지를 더 쉽게 이해하기 위함이다.**
 
 ### 객체의 배열과 기본 타입의 배열
 
-6.4요약
+코틀린에서 배열을 만드는 방법
+
+* array() 함수
+
+```kotlin
+val arr1 = arrayOf(1, 2, 3, 4, 5)
+```
+
+* arrayOfNulls() 함수 
+
+```kotlin
+val arr2 = arrayOfNulls<String>(5)  // [null, null, null, null, null]
+```
+
+* Array 생성자  : Array 클래스의 생성자를 사용하여 초기화 함수를 기반으로 배열을 생성
+
+```kotlin
+val arr3 = Array(5) { i -> (i * i).toString() }  // ["0", "1", "4", "9", "16"]
+```
 
 
-2부. 코틀린답게 사용하기
+
+# 2부. 코틀린답게 사용하기
 
 # 7장. 연산자 오버로딩과 기타 관례
 
