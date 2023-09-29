@@ -145,10 +145,6 @@
   - [고차 함수 정의](#고차-함수-정의)
     - [함수 타입](#함수-타입)
     - [인자로 받은 함수 호출](#인자로-받은-함수-호출)
-    - [자바에서 코틀린 함수 타입 사용](#자바에서-코틀린-함수-타입-사용)
-    - [디폴트 값을 지정한 함수 타입 파라미터나 널이 될 수 있는 함수 타입 파라미터](#디폴트-값을-지정한-함수-타입-파라미터나-널이-될-수-있는-함수-타입-파라미터)
-    - [함수를 함수에서 반환](#함수를-함수에서-반환)
-    - [람다를 활용한 중복 제거](#람다를-활용한-중복-제거)
   - [인라인 함수: 람다의 부가 비용 없애기](#인라인-함수-람다의-부가-비용-없애기)
     - [인라이닝이 작동하는 방식](#인라이닝이-작동하는-방식)
     - [인라인 함수의 한계](#인라인-함수의-한계)
@@ -2447,58 +2443,524 @@ val arr3 = Array(5) { i -> (i * i).toString() }  // ["0", "1", "4", "9", "16"]
 
 # 7장. 연산자 오버로딩과 기타 관례
 
+관례 : 언어의 어떤 기능과 미리 정해진 이름의 함수를 연결해주는 기법
+
+- ex) `+` 연산자와 `plus`라는 함수를 연결시킬 수 있다. → + 연산자를 사용하면 plus가 호출되는 방식
+
+자바는 언어 기능을 타입에 의존하고, 코틀린은 (함수 이름을 통한) 관례에 의존한다.
+
+- 코틀린은 왜 관례에 의존할까?
+  - 기존 자바 클래스를 코틀린 언어에 적용하기 위함
+  - 기존 자바 클래스에 대해 확장 함수를 구현하면서 관례에 이름을 붙이면 기존 자바 코드를 바꾸지 않아도 새로운 기능을 쉽게 부여할 수 있다.
+
+연산자 오버로딩은 operator fun 키워드를 이용하여 구현할 수 있다. 
+연산자를 오버로딩하는 함수 앞에는 꼭 operator를 붙여야한다.
+
 ## 산술 연산자 오버로드
 
 ### 이항 산술 연산 오버로딩
 
+```kotlin
+data class Point(val x: Int, val y: Int) {
+    operator fun plus(other: Point): Point {
+        return Point(x + other.x, y + other.y)
+    }
+}
+```
+
+다음과 같이 사용 가능
+
+```kotlin
+println(p1 +  p2) // + 로 계산하면 "plus" 함수가 호출된다.
+
+Potin(x=40, y=60)
+```
+
+* 내부에서 p1.plus(p2)가 호출된다.
+
+`연산자를 확장 함수로 정의할 수도 있다.`
+
+```kotlin
+operator fun Point.plus(other: Point) : Point {
+  return Point(x + other.x, y + other.y)
+}
+```
+
+> 외부 함수의 클래스에 대한 연산자를 정의할 때는 관례를 따르는 이름의 확장함수로 구하는게 일반적인 패턴이다.
+
+오버로딩 가능한 이항 산술 연산자
+
+| 식    | 함수 이름        |
+| ----- | ---------------- |
+| a * b | times            |
+| a / b | div              |
+| a % b | mod(1.1부터 rem) |
+| a + b | plus             |
+| a - b | minus            |
+
+- 코틀린에서는 프로그래머가 `직접 연산자를 만들어 사용할 수 없고` `언어에서 미리 정해둔 연산자만 오버로딩할 수 있으며`, 관례에 따르기 위해 클래스에서 정의해야 하는 이름이 연산자별로 정해져 있다.
+- 연산자 우선순위는 언제나 표준 숫자 타입에 대한 연산자 우선순위와 같다.
+  - ex) a + b * c 라는 식에서 언제나 곱셈이 항상 덧셈보다 먼저 수행된다.
+
 ### 복합 대입 연산자 오버로딩
+
+이항 산술 연산자를 오버로딩하면 연산자 뿐 아니라 그와 관련있는 연산(+=, -=)도 자동으로 함께 지원한다.
+
+```kotlin
+fun main(args: Array<String>) {
+    var point = Point(1, 2)
+    point += Point(3, 4)
+    println(point)
+}
+```
+
+mutable Collection에 원소를 추가하는 연산도 사용할 수 있다.
+
+반환타입이 Unit인 plusAssign 함수를 정의하면 코틀린은 += 연산자에 그 함수를 사용한다.
+
+```kotlin
+operator fun<T> MutableCollection<T>.plusAssign(element: T) {
+  this.add(element)
+}
+
+// 실행
+var numbers = ArrayList<Int>()
+
+numbers += 42
+
+println(numbers[0]) // 42
+```
+
+코틀린 표준 라이브러리는 컬렉션에 대해 두 가지 접근 방법을 함께 제공한다.
+
+- +와 - 연산자 ⇒ 두 컬렉션을 연산하여 항상 새로운 컬렉션 반환
+- +=와 -= 연산자 ⇒ 항상 변경 가능한 원본 컬렉션에 작용해 메모리에 있는 객체 상태를 변화 
+
+따라서 var로 선언한 변수가 가리키는 읽기 전용 컬렉션에만 += 와 -=를 적용할 수 있다
 
 ### 단항 연산자 오버로딩
 
+```kotlin
+data class Point(val x: Int, val y: Int)
+
+operator fun Point.unaryMinus(): Point {
+    return Point(-x, -y)
+}
+
+fun main(args: Array<String>) {
+    val p = Point(10, 20)
+    println(-p)
+}
+```
+
+| 식           | 함수 이름    | 간단한 설명             |
+| ------------ | ------------ | ----------------------- |
+| `+a`         | `unaryPlus`  | 양의 부호를 반환합니다. |
+| `-a`         | `unaryMinus` | 값의 부호를 바꿉니다.   |
+| `!a`         | `not`        | 부울 값을 반전시킵니다. |
+| `++a`, `a++` | `inc`        | 값을 1 증가시킵니다.    |
+| `--a`, `a--` | `dec`        | 값을 1 감소시킵니다.    |
+
+**직접 정의한 함수를 통해 구현하더라도 연산자 우선순위는 언제나 표준 숫자 타입에 대한 연산자의 우선순위와 같다.**
+
 ## 비교 연산자 오버로딩
+
+equals나 compareTo를 호출해야 하는 자바와 달리 코틀린에서는 == 비교 연산자를 직접 사용할 수 있어서
+
+코드가 equals나 compareTo를 사용한 코드보다 간결하며 이해하기 쉽다.
 
 ### 동등성 연산자: "equals"
 
+코틀린은 ==, `!=` 연산자 호출을 equals 메서드 호출로 컴파일한다.
+
+- ==와 `!=`는 내부에서 인자가 널인지 검사하므로 다른 연산과 달리 널이 될 수 있는 값에도 적용할 수 있다.
+  - a == b 비교를 처리할 때 코틀린은 a가 널인지 판단해서 널이 아닌 경우에만 a.equals(b)를 호출한다.
+
+즉 a.equals(b)인데, a가 null이면 false여서 null-safe하고 Objects.equals()를 쓸 필요가 없다
+
+```kotlin
+data class Point(val x: Int, val y: Int) {
+
+    override fun equals(other: Any?): Boolean { // Any에 정의된 메소드를 오버라이딩한다.
+        if (this === other) return true // 최적화: 파라미터 `this`와 같은 객체인지 살펴본다
+        if (other !is Point) return false // 파라미터 타입을 검사한다.
+
+        if (x != other.x) return false
+        if (y != other.y) return false
+        return true
+    }
+}
+```
+
+equals에 operator 키워드를 붙일 필요가 없다.
+
+Any의 equals에 operator가 붙어 있기 때문이다.
+equals를 오버라이드하는 경우 operator 변경자를 붙이지 않아도 자동으로 상위 클래스의 operator 지정이 적용된다.
+
+- Any에서 상속받은 equals가 확장 함수보다 우선순위가 높기 때문에 equals를 확장 함수로 정의할 수 없다.
+
+식별자 비교 연산자인 `===`는 자신의 두 피연산자가 서로 같은 객체를 가리키는지 비교한다. (동일성) `===`를 오버로딩할 수는 없다
+
 ### 순서 연산자: compareTo
+
+비교 연산자(<, >, ≤, ≥)는 compareTo 호출로 컴파일된다. compareTo가 반환하는 값은 Int다.
+
+- ex) a ≥ b → a.compareTo(b) ≥ 0
+- 코틀린은 Comparable 인터페이스를 지원하며, Comparable.compareTo 메소드를 호출하는 관례를 제공한다.
+
+```kotlin
+data class Point(
+  val x: Int, 
+  val y: Int) 
+: Comparable<Point> {
+    override fun compareTo(other: Point): Int {
+        return compareValuesBy(this, other, Point::x, Point::y)
+    }
+}
+```
+
+코틀린 표준 라이브러리의`compareValuesBy`함수를 사용해 `compareTo`함수를 통해 구현한다.
 
 ## 컬렉션과 범위에 대해 쓸 수 있는 관례
 
+
+
+컬렉션을 이용할 때 인덱스를 사용하는데, a[b]라는 식이나 in 연산자를 사용할 수 있다. 
+
 ### 인덱스로 원소에 접근: get과 set
+
+```kotlin
+x[a, b] → x.get(a, b)
+```
+
+- 인덱스를 사용해 원소를 읽는 연산은 get 연산자 메서드로 변환된다.
+
+```kotlin
+x[a, b] = c → x.set(a, b. c)
+```
+
+- 원소를 쓰는 연산은 set 연산자 메서드로 변환된다.
+
+```kotlin
+operator fun Point.get(index: Int): Int {
+	return when(index) {
+		0 -> x, 
+		1 -> y,
+		else -> throw IndexOutOfBoundsException("Invalid coordinate $index")
+	}
+}
+
+operator fun MutablePoint.set(index: Int, value: Int) {
+	when(index) {
+		0 -> x = value
+		1 -> y = value
+		else ->
+			throw IndexOutOfBoundsException("Invalid coordinate $index")
+	}
+}
+```
 
 ### in관례
 
+```kotlin
+a in c → c.contains(a)
+```
+
+- in의 우항에 있는 객체는 contains 메서드의 수신 객체가 되고 in의 좌항에 있는 객체는 contains 메서드에 인자로 전달된다.
+
+```kotlin
+data class Rectangle(val upperLeft: Point, val lowerRight: Point)
+
+operator fun Rectangle.contains(p: Point): Boolean {
+	return p.x in upperLeft.x until lowerRight.x && 
+		p.y in upperLeft.y until lowerRight.y 
+}
+```
+
 ### rangeTo관례
+
+범위(range)를 만드려면 .. 구문을 사용해야 한다.
+
+- start..end → start.rangeTo(end)
+  - .. 연산자는 rangeTo 함수 호출로 컴파일된다.
+
+코틀린 표준 라이브러리에는 모든 Comparable 객체에 대해 적용 가능한 rangeTo 함수가 들어있다.
+
+- rangeTo 연산자는 다른 산술 연산자보다 우선순위가 낮으므로 혼동을 피하기 위해 괄호로 인자를 감싸주면 좋다.
+
+```kotlin
+(0..n).forEach {print(it)}
+```
 
 ### for 루프를 위한 iterator 관례
 
+for루프는 in 연산자를 사용하지만 이 경우 in의 의미는 다르다
+
+for (x in list) {...} 같은 문장은 list.iterator()를 호출해서 hasNext와 next를 반복하는 식으로 변환된다.
+
+```kotlin
+// 날짜 범위에 대한 이터레이터 구하기
+operator fun ClosedRange<LocalDate>.iterator(): Iterator<LocalDate> =
+        object : Iterator<LocalDate> {
+            var current = start
+
+            override fun hasNext() =
+                current <= endInclusive
+
+            override fun next() = current.apply {
+                current = plusDays(1)
+            }
+        }
+
+fun main(args: Array<String>) {
+    val newYear = LocalDate.ofYearDay(2017, 1)
+    val daysOff = newYear.minusDays(1)..newYear
+    for (dayOff in daysOff) { println(dayOff) }
+}
+```
+
 ## 구조 분해 선언과 component 함수
 
+구조 분해를 사용하면 복합적인 값을 분해해서 여러 다른 변수를 한꺼번에 초기화할 수 있다.
+
+```kotlin
+val (a, b) = p
+val a = p.component1()
+val b = p.component2()
+```
+
+참고로 구조 분해는 component1 ~ component5 까지만 사용할 수 있다.
+
+* 컴파일러가 자동으로 componentN 함수를 만들어준다. 무한히 만들수는 없기 때문에 5개만 지원한다. 
+
+컬렉션 크기를 벗어나는 위치의 원소에 대한 구조 분해 선언을 사용하면 실행 시점에 java.lang.ArrayIndexOutOfBoundException 예외가 발생한다.
+
 ### 구조 분해 선언과 루프
+
+Map 원소에 대해 이터레이션할 때 구조 분해 선언이 유용하다.
+
+```kotlin
+for (entry in map.entries) {
+  val key = entry.component1()
+	val value = entry.component2()
+}
+```
+
+확장함수 지린다.. 관례(컨벤션)를 다구현한다
 
 ## 프로퍼티 접근자 로직 재활용: 위임 프로퍼티
 
 ### 위임 프로퍼티 소개
 
+위임 프로퍼티를 사용하면 값을 뒷받침하는 필드에 단순히 저장하는 것보다 더 복잡한 방식으로 작동하는 프로퍼티를 쉽게 구현할 수 있다.
+
+위임은 객체가 직접 작업을 수행하지 않고 다른 도우미 객체가 그 작업을 처리하게 맡기는 디자인 패턴이다.
+
+이때 작업을 처리하는 객체를 위임 객체라고 부른다.
+예를들어, 프로퍼티는 위임을 사용해 값을 필드가 아니라 DB 테이블이나 브라우저 세션 등에도 저장할 수 있다. 
+
+아래와 같이 p 프로퍼티는 접근자 로직을 다른 객체에 위임한다.
+
+```kotlin
+class Foo {
+  var p: Type by Delegate()
+}
+```
+
+
+
+아래와 같이 컴파일러는 숨겨진 도우미 프로퍼키를 만들고 그 프로퍼티를 위임 객체의 인스턴스로 초기화한다.
+
+```kotlin
+class Foo {
+  private val delegate = Delegate() // 컴파일러가 생성한 도우미 프로퍼티 
+  var p: Type
+  set(value: Type) = delegate.setValue(..., value) 
+  get() = delegate.getValue(...)
+}
+```
+
+* p 프로퍼티를 위해 컼파일러가 생성한 접근자는 delegate의 setValue()와 getValie()를 호출한다.
+
+Deletegate 클래스는 getValue()와 setValue()를 제공해야 한다.
+
+* 멤버 메소드이거나 확장 함수 일 수 있다. 
+
+```kotlin
+class Delegate {
+  operator fun getValue(...) {}
+  operator fun setValue(..., value: Type) {}
+}
+```
+
 ### 위임 프로퍼티 사용: by lazy()를 사용한 프로퍼티 초기화 지연
+
+지연 초기화는 객체의 일부분을 초기화하지 않고 남겨뒀다가 실제로 그 부분의 값이 필요한 경우 초기화할 때 쓰이는 패턴이다.
+
+초기화 과정에 자원을 많이 사용하거나 객체를 사용할 때마다 꼭 초기화하지 않아도 되는 프로퍼티에 대해 지연초기화 패턴을 사용할 수 있다.
+
+ex) Person 클래스가 자신이 작성한 이메일 목록을 제공한다고 가정. 이메일은 DB에 들어있다.
+
+```kotlin
+class Person(val name: String) {
+  private var _emails: List<Email>? = null // 
+  
+	val emails: List<Email>
+    get() {
+      if (_emails == null) {
+		    _emails = loadEmails(this) // 최초 접근시 이메일 가져옴 
+      }
+		
+      return _emails!! 
+    }
+}
+
+class Email {}
+fun loadEmails(person: Person) : List<Email> {
+  ~~ 구현 
+}
+```
+
+이렇게 지연 초기화를 구현할 수 있지만, 코드가 많아지고 스레드 세이프를 보장하지 않는다.
+
+코틀린을 사용한다면 위임 프로퍼티를 사용하여 간단하게 지연 초기화를 사용할 수 있다.
+
+```kotlin
+class Person(val name: String) {
+  val emails by lazy {loadEmails(this)}
+}
+```
 
 ### 위임 프로퍼티 구현
 
+by 키워드를 사용해 위임 객체를 지정하면 이전 예제에서 직접 코드를 짜야 했던 여러 작업을 코틀린 컴파일러가 자동으로 처리해준다. 
+
+* by 오른쪽에 오는 객체를 위임 객체라고 부른다.
+
 ### 위임 프로퍼티 컴파일 규칙
+
+```kotlin
+// 컴파일 전
+class C {
+	var prop: Type by MyDelegate()
+}
+
+val c = C()
+
+// 컴파일 후
+class C {
+	private val <delegate> = MyDelegate()
+	var prop: Type
+	get() = <delegate>.getValue(this, <property>)
+	set(value: Type) = <delegate>.setValue(this, <property>, value)
+}
+```
+
+* MyDelegate의 인스턴스를 감춰진 프로퍼티에 저장하며, `<delegate>` 라는 이름으로 부른다. 
+* 컴파일러는 프로퍼티를 표현하기 위해 KProperty 타입 객체를 사용하며 그 객체를 저장하는 공간
+* 컴파일러는 프로퍼티 접근자 안에 getValue(), setValue() 호출 코드를 생성해준다 
+
+```kotlin
+val x = c.prop —> val x = <delegate>.getValue(c, <property>)
+c.prop = x —> <delegate>.setValue(c, <property> , x)
+```
 
 ### 프로퍼티 값을 맵에 저장
 
+Map 을 사용하는 코드에 위임 프로퍼티를 적용해볼 수 있다.
+
+```kotlin
+// 위임 프로퍼티 X
+class Person {
+	private val _attributes = hashMapOf<String, String>()
+	
+	fun setAttribute(attrName: String, value: String) {
+		_attribute[attrName] = value
+	}
+
+	val name: String
+	get() = _attributes["name"]!!
+}
+
+// 위임 프로퍼티 활용 O
+class Person {
+	private val _attributes = hashMapOf<String, String>()
+	
+	fun setAttribute(attrName: String, value: String) {
+		_attribute[attrName] = value
+	}
+
+	val name: String by _attributes
+}
+```
+
 ### 프레임워크에서 위임 프로퍼티 활용
 
-## 요약
+데이터베이스에서 가져오는 예제.
+
+데이터베이스에 Users 라는 테이블이 있고 그 테이블에는 name, age 칼럼이 있다고 하자.
+
+테이블 객체를 Users 객체로 정의하고 엔티티를 User 클래스로 정의를 하면 아래와 같이 위임 프로퍼티를 사용하여 간단하게 작성할 수 있다.
+
+```kotlin
+// DB 매핑 객체
+Object Users : IdTable() {
+	val name = varchar("name", length = 50).index()
+	val age = integer("age")
+}
+
+// VO
+class User(id: EntityID) : Entity(id) {
+	var name = String by Users.name
+	var age = Int by Users.age
+}
+```
+
+
 
 
 # 8장. 고차 함수: 파라미터와 반환 값으로 람다 사용
 
 ## 고차 함수 정의
 
-### 함수 타입
+고차함수란 다른 함수를 인자로 받거나 함수를 반환하는 함수
+
+- 함수를 인자로 받는 동시에 함수를 반환하는 함수도 고차함수
+
+```kotlin
+list.filter { x > 0} // 함수를 인자로 받으므로 고차 함수 
+```
+
+```kotlin
+var canReturnNull: (Int, Int) -> Int? = {x, y => null}
+
+var funOrNull: ((Int, Int) -> Int) ? null
+```
+
+- funOrNull과 같이 null이 될 수 있는 함수 타입 변수 정의 가능
+- funOrNull 타입 지정 시 괄호를 빼먹으면 널이 될 수 있는 함수 타입이 아니라 널이 될 수 있는 반환 타입을 갖는 함수 타입을 선언
+
+함수 타입에서 파라미터 이름을 지정할 수도 있다.
 
 ### 인자로 받은 함수 호출
+
+```kotlin
+fun twoAndThree(operation: (Int, Int) -> Int) { // 함수 타입인 파라미터 선언 
+    val result = operation(2, 3) // 함수 타입인 파라미터 호출 
+    println("The result is $result")
+}
+
+fun main(args: Array<String>) {
+    twoAndThree { a, b -> a + b }
+    twoAndThree { a, b -> a * b }
+}
+```
+
+<img src="./images/183239878-e81825e7-9131-4bbe-87d4-32e6577a953b.png">
+
+
+
+
 
 ### 자바에서 코틀린 함수 타입 사용
 
@@ -2510,23 +2972,183 @@ val arr3 = Array(5) { i -> (i * i).toString() }  // ["0", "1", "4", "9", "16"]
 
 ## 인라인 함수: 람다의 부가 비용 없애기
 
+람다를 사용할때마다 새로운 클래스가 만들어지지는 않는다.
+
+람다가 외부 변수를 캡쳐하면 람다 생성 시점마다 새로운 무명 클래스 객체가 생겨 부가 비용이 든다.
+
+inline 변경자를 어떤 함수에 붙이면 컴파일러는 그 함수를 호출하는 모든 문장을 함수 본문에 해당하는 바이트 코드로 바꿔치기 해준다 
+`inline` 함수를 사용하면 함수 호출이 아닌 함수 본문의 코드가 호출 위치에 복사됩니다. 
+즉, 실제 함수 호출이 발생하지 않고 함수의 코드가 직접 삽입됩니다.
+
+### 장점
+
+1. **성능 향상**: 함수 호출 오버헤드가 없어집니다.
+2. **람다 부가 비용 제거**: 람다가 생성하는 추가 객체와 메모리 할당이 제거됩니다.
+3. **코드 최적화**: `inline` 함수와 함께 사용되는 `return`, `break` 등의 제어 구문이 더 효율적으로 작동할 수 있습니다.
+
+### 단점
+
+1. **코드 크기 증가**: `inline` 함수의 본문이 모든 호출 위치에 복사되므로, 코드 크기가 커질 수 있습니다.
+2. **컴파일 시간 증가**: 더 많은 코드를 생성해야 하므로 컴파일 시간이 늘어날 수 있습니다.
+
 ### 인라이닝이 작동하는 방식
 
-### 인라인 함수의 한계
+inline으로 함수 선언시 
 
-### 컬렉션 연산 인라이닝
+```kotlin
+inline fun <T> List<T>.customFilter(predicate: (T) -> Boolean): List<T> {
+    val result = mutableListOf<T>()
+    for (item in this) {
+        if (predicate(item)) {
+            result.add(item)
+        }
+    }
+    return result
+}
+```
+
+아래처럼 호출시
+```kotlin
+fun main() {
+    val numbers = listOf(1, 2, 3, 4, 5, 6)
+    val evenNumbers = numbers.customFilter { it % 2 == 0 }
+    println(evenNumbers)
+}
+```
+
+아래처럼 바꿔치기한다
+
+```kotlin
+fun main() {
+    val numbers = listOf(1, 2, 3, 4, 5, 6)
+    
+    val result = mutableListOf<Int>()
+    for (item in numbers) {
+        if (item % 2 == 0) {
+            result.add(item)
+        }
+    }
+    val evenNumbers = result
+
+    println(evenNumbers)
+}
+```
 
 ### 함수를 인라인으로 선언해야 하는 경우
 
+람다를 인자로 받는 함수를 인라이닝하면 이익이 많다.
+
+1. 함수 호출비용을 줄이고 람다 인스턴스에 해당하는 객체를 만들 필요가 없어진다
+
+2. nonLocal 반환이 있다. `inline` 함수에서 람다를 사용할 때 `return`을 사용하면 람다를 호출한 함수 자체를 빠져나올 수 있어서 얼리 리턴을 할 수 있다.
+
+인라이닝 하는 함수가 큰 경우 바이트 코드가 전체적으로 커질 수 있으므로 주의해야 한다.
+
+* 코틀린 표준 라이브러리가 제공하는 인라인 함수들은 크기가 매우 작다.
+
 ### 자원 관리를 위해 인라인된 람다 사용
+
+use 함수. 
+
+use 함수는 closeable 을 구현한 클래스에 사용할 수 있는 확장 함수며 람다를 인자로 받는다.
+
+람다를 호출한 이후 자원을 닫아준다
+
+```kotlin
+fun readFirstLineFromFile(path: String) : String {
+  BufferedReader(FileReader(path)).use {
+    br -> return br.readLine()
+  }
+}
+```
+
+
 
 ## 고차 함수 안에서 흐름 제어
 
 ### 람다 안의 return문: 람다를 둘러싼 함수로부터 반환
 
+```kotlin
+data class Person(val name: String, val age: Int)
+
+val people = listOf(Person("Alice", 29), Person("Bob", 31))
+
+fun lookForAlice(people: List<Person>) {
+    people.forEach {
+        if (it.name == "Alice") {
+            println("Found!")
+            return
+        }
+    }
+    println("Alice is not found")
+}
+
+fun main(args: Array<String>) {
+    lookForAlice(people) // Found!
+}
+```
+
+람다 안에서 return을 사용하면 람다로부터 반환되는 게 아니라 **그 람다를 호출하는 함수가 실행을 끝내고 반환된다.**
+
+* 이를 넌로컬 리턴이라고 하며 자신을 둘러싸고 있는 블록보다 더 바깥에 있는 다른 블록을 반환하게 만드는 return 문이다
+
+* return이 바깥쪽 함수를 반환시킬 수 있는 때는 람다를 인자로 받는 함수가 인라인 함수인 경우 뿐이다.
+
+
+
+함수를 직관적으로 빠르게 종료시킬 수 있으며 코드가 간결해지지만
+
+가독성이 저하되고 코드 추적이 어려워 가독성이 떨어질 수 있고 인라인 람다 함수에서만 사용할 수 있다
+
 ### 람다로부터 반환: 레이블을 사용한 return
 
+@label 키워드 -> 로컬 리턴(Local Return)
+
+```kotlin
+data class Person(val name: String, val age: Int)
+
+val people = listOf(Person("Alice", 29), Person("Bob", 31))
+
+fun lookForAlice(people: List<Person>) {
+    people.forEach label@{
+        if (it.name == "Alice") return@label // forEach를 끝내고 println()을 실행한다. 
+    }
+    println("Alice might be somewhere")
+}
+
+fun main(args: Array<String>) {
+    lookForAlice(people) // Alice might be somewhere
+}
+```
+
+넌로컬 리턴과 달리,
+
+람다의 실행을 끝내고 람다를 호출했던 코드의 실행을 이어가고 싶으면 local return을 하면 된다
+
+* 람다 안에서 로컬 return은 for 루프의 break와 비슷한 역할을 한다.
+
+넌 로컬 반환문을 여러번 사용해야 하는 코드는 무명함수를 통해 해결할 수 있다.
+
 ### 무명 함수: 기본적으로 로컬 return
+
+```kotlin
+fun lookForAlice(people: List<Person>) {
+    people.forEach(fun (person) { // 무명 함수 
+        if (person.name == "Alice") return
+        println("${person.name} is not Alice")
+    })
+}
+```
+
+무명 함수 안에서 레이블이 붙지 않은 return 식은 무명 함수 자체를 반환시킬 뿐 무명 함수를 둘러싼 다른 함수를 반환시키지 않는다.
+
+식이 본문인 무명 함수
+
+```kotlin
+people.filter(fun (person) = person.age < 30)
+```
+
+
 
 ## 요약
 
