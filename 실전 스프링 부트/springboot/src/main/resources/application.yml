@@ -1,0 +1,10 @@
+server:
+  port: 7634
+
+spring:
+  cloud:
+    stream:
+      bindings:
+        reportPositions-out-0:
+          destination: aircraftpositions
+          binder: rabbit
