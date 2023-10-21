@@ -205,13 +205,13 @@ public class TransactionProcessingJob {
 				.next(applyTransactionsStep())
 				.next(generateAccountSummaryStep())
 				.build();
-//		return this.jobBuilderFactory.get("transactionJob")
-//				.start(importTransactionFileStep())
-//				.on("STOPPED").stopAndRestart(importTransactionFileStep())
-//				.from(importTransactionFileStep()).on("*").to(applyTransactionsStep())
-//				.from(applyTransactionsStep()).next(generateAccountSummaryStep())
-//				.end()
-//				.build();
+		return this.jobBuilderFactory.get("transactionJob")
+				.start(importTransactionFileStep())
+				.on("STOPPED").stopAndRestart(importTransactionFileStep())
+				.from(importTransactionFileStep()).on("*").to(applyTransactionsStep())
+				.from(applyTransactionsStep()).next(generateAccountSummaryStep())
+				.end()
+				.build();
 	}
 
 	public static void main(String[] args) {
