@@ -28,8 +28,10 @@ public class ZipCodeClassifier implements Classifier<Customer, ItemProcessor<Cus
 	private ItemProcessor<Customer, Customer> oddItemProcessor;
 	private ItemProcessor<Customer, Customer> evenItemProcessor;
 
-	public ZipCodeClassifier(ItemProcessor<Customer, Customer> oddItemProcessor,
-			ItemProcessor<Customer, Customer> evenItemProcessor) {
+	public ZipCodeClassifier(
+		ItemProcessor<Customer, Customer> oddItemProcessor,
+		ItemProcessor<Customer, Customer> evenItemProcessor
+	) {
 
 		this.oddItemProcessor = oddItemProcessor;
 		this.evenItemProcessor = evenItemProcessor;
@@ -37,10 +39,9 @@ public class ZipCodeClassifier implements Classifier<Customer, ItemProcessor<Cus
 
 	@Override
 	public ItemProcessor<Customer, Customer> classify(Customer classifiable) {
-		if(Integer.parseInt(classifiable.getZip()) % 2 == 0) {
+		if (Integer.parseInt(classifiable.getZip()) % 2 == 0) {
 			return evenItemProcessor;
-		}
-		else {
+		} else {
 			return oddItemProcessor;
 		}
 	}
