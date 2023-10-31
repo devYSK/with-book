@@ -688,6 +688,503 @@ RDBMS에서 Not-equal 비교는 인덱스를 제대로 활용할 수 없듯이 �
 
 ## CTE (Common Table Expression)
 
+Common Table Expression : 이름을 가지는 임시 테이블.
+
+한 번 이상 여러번 재사용 될 수 있으며 SQL문이 종료되면 자동으로 CTE 임시 테이블은 삭제된다.
+
+두가지로 분류할 수 있는데
+
+* Non-recusive CTE : 재귀적 비반복 테이블
+* RecursiveCTE : 재귀적 반복 테이블
+
+다음과 같이 다양한곳에서 쓸 수 있다.
+
+1. SELECT, UPDATE, DELETE 문장의 제일 앞쪽
+
+```mysql
+WITH cte1 AS (SELECT ...) SELECT ...
+WITH cte1 AS (SELECT ...) UPDATE ...
+WITH cte1 AS (SELECT ...) DELETE ...
+```
+
+2. 서브쿼리 제일 앞쪽
+
+```mysql
+SELECT .. FROM 
+.. WHERE id IN (WITH cte1 AS (SELECT ...) SELECT ...) ...
+
+SELECT ... FROM (WITH cte1 AS (SELECT ...) SELECT ...)
+```
+
+3. SELECT 절의 바로 앞쪽
+
+```mysql
+INSERT ... WITH cte1 AS (SELECT ...) SELECT ...
+REPLACE ... WITH cte1 AS (SELECT ...) SELECT ...
+CREATE TABLE ... WITH cte1 AS (SELECT ...) SELECT ...
+CREATE VIEW ... WITH cte1 AS (SELECT ...) SELECT ...
+DECLARE CURSOR ... WITH cte1 AS (SELECT ...) SELECT ...
+EXPLAIN ... WITH cte1 AS (SELECT ...) SELECT ...
+```
+
+### 비 재귀적 CTE (Non-Recursive CTE)
+
+ANSI 표준인 WITH절을 이용해 정의한다
+
+```mysql
+WITH cte1 AS (SELECT * FROM departments)
+SELECT * FROM cte1;
+```
+
+여러 임시테이블도 사용할 수 있따.
+
+```mysql
+WITH cte1 AS (SELECT * FROM departments),
+		 cte2 AS (SELECT * FROM dept_emp)
+		 SELECT *
+		 FROM temp1
+		 	INNER JOIN cte2 ON cte2.dpth_no = cte1.dept_no
+```
+
+CTE가 기존 FROM절에 사용되던 서브쿼리에 비해 다음 3가지 장점이 있다.
+
+- ﻿﻿CTE 임시 테이블은 재사용 가능하므로 FROM 절의 서브쿼리보다 효율적이다.
+- ﻿﻿CTE로 선언된 임시 테이블을 다른 CTE 쿼리에서 참조할 수 있다.
+- ﻿﻿CTE는 임시 테이블의 생성 부분과 사용 부분의 코드를 분리할 수 있으므로 가독성이 높다.
+
+비 재귀적 CTE는 단순히 쿼리를 한 번만 실행해 그 결과를 임시 테이블로 저장한다
+
+### 재귀적 CTE(Recursive CTE)
+
+재귀적으로 CTE를 사용할 수 있다.
+
+```mysql
+WITH RECURSIVE cte (no) AS (
+	SELECT 1 // 1.  비 재귀적 부분 쿼리 
+  UNION ALL
+  SELECT (no + 1) FROM cte WHERE no < 5 // 2. 재귀적 쿼리 
+)
+SELECT * FROM cte
+```
+
+* UNION ALL 위쪽의 "SELECT 1"은 비 재귀적 파트
+* UNION ALL 아래의 "SELECT (no + 1) FROW cte WHERE no < 5는 재귀적 파트
+
+재귀적 CTE 쿼리 는 비 재귀적 쿼리 파트와 재귀적 파트로 구분되며, `이 둘을 UNION(UNION DISTINCT) 또는 UNION ALL로 연결하는 형태로 반드시 쿼리를 작성해야 한다`
+
+위 예제 쿼리가 작동화는 결과는 다음과 같다.
+
+1. ﻿﻿﻿CTE 쿼리의 비 재귀적 파트의 쿼리를 실행
+2. ﻿﻿﻿1번의 결과를 이용해 cte라는 이름의 임시 테이블 생성
+3. ﻿﻿﻿1번의 결과를 cte라는 임시 테이블에 저장
+4. ﻿﻿﻿1번 결과를 입력으로 사용해 CTE 쿼리의 재귀적 파트의 쿼리를 실행
+5. ﻿﻿﻿4번의 결과를 cte라는 임시 테이블에 저장(이때 UNION 또는 UNION DISTINCT의 경우 중복 제거를 실행)
+6. ﻿﻿﻿전 단계의 결과를 입력으로 사용해 CTE 쿼리의 재귀적 파트 쿼리를 실행
+7. ﻿﻿﻿6번 단계에서 쿼리 결과가 없으면 CTE 쿼리를 종료
+8. ﻿﻿﻿6번의 결과를 cte라는 임시 테이블에 저장
+9. ﻿﻿﻿6번으로 돌아가서 반복 실행
+
+즉 비 재귀적 파트(1)는 초기 데이터와 임시 테이블의 구조를 결정하고, 
+
+재귀적 파트(2)에서는 데이터를 생성하는 역할을 한다.
+
+`재귀적 쿼리 파트를 실행할 때는 지금까지의 모든 단계에서 만들어진 결과 셋이 아니라 직전 단계의 결과만 재귀 쿼리의 입력으로 사용된다.`
+
+또한 재귀 CTE에서 주의해야 하는 점은 종료 조건이다. 
+
+실제 재귀 쿼리가 반복을 멈추는 조건은 재귀 파트 쿼리의 결과가 0건일 때 까지이다. 
+
+* 위 예시에서는 no가 5가되면 WHERE no < 5의 결과는 0건이 되므로 멈춘다.
+
+실수로 무한 반복 을 방지하기 위해 cte_max_recusion_depth 시스템 변수를 이용할 수 있다.
+
+* 기본값은 1000. 적절히 낮추는것이 좋다.
+
+* 필요한 쿼리에서만 SET_VAR 힌트를 이용해 해당 쿼리에서만 반복 호출 횟수를 늘리는 방법이 권장
+
+```mysql
+WITH RECURSIVE cte (no) AS (
+    SELECT 1
+    UNION ALL
+    SELECT (no + 1) FROM cte WHERE no < 10
+)
+SELECT /*+ SET_VAR(cte_max_recursion_depth = 500) */ * FROM cte;
+```
+
+### 재귀적 CTE(Recursive CTE) 활용방안
+
+employees 테이블에서 직원 Adil(id=123)의 상위 조직장을 찾는 쿼리
+
+```mysql
+WITH RECUSIVE
+			managers AS(
+      	SELECT *, 1 As lv FROM employees WHERE id = 123
+        UNION ALL
+        SELECT e.*, lv+1 FROM managers m
+        INNER JOIN employees e ON e.id = m.manager_id AND m.manager_id IS NOT NULL
+      )
+SELECT * FROM managers
+ORDER BY lv DESC;
+```
+
+```
++------+---------+------------+------+
+| id   | name    | manager_id | lv   |
++------+---------+------------+------+
+| 333  | Yasmina | NULL       | 3    |
+| 692  | Tarek   | 333        | 2    |
+| 123  | Adil    | 692        | 1    |
++------+---------+------------+------+
+```
+
+
+
+## 윈도우 함수 (Window FUnction)
+
+윈도우 함수는 조회하는 현재 레코드 기준 연관된 레코드 집합 연산 수행하는 함수
+
+* 집계함수는 주어진 그룹(Group By 절에 나열된 컬럼값)별로 하나의 레코드로 묶어서 출력
+
+윈도우함수는 집계함수랑 다르게 조건에 일치하는 레코드 건수가 변하지 않고 그대로 유지된다
+
+* 집계함수와 큰 차이점 
+* 윈도우 함수는 각 행에 대한 결과를 반환하는 반면, 일반적인 집계 함수는 그룹 전체에 대한 하나의 결과를 반환
+
+### 윈도우 함수 쿼리 각 절의 실행 순서
+
+FROM절 WHERE절 GROUP BY와 HAVING 절에 의해 결정되고 그 이후 윈도우 함수가 실행
+
+<img src="./images//image-20231031210004948.png" width = 650 height = 400>
+
+윈도우 함수를 GROUP BY 컬럼으로 사용하거나 WHERE절에 사용할 수 없다.
+
+* 그룹바이랑 웨얼절은 윈도우 함수 이전에 사용되니까.
+
+즉 전체 100만건이고, 조건에 맞는것이 50만건이여도
+
+전체 100만건 대상으로 윈도우 함수 처리를 한다.
+
+서브쿼리로 50만건으로 줄인다면, 서브쿼리 50만건에 대해서만 윈도우 함수 처리를 한다. 
+
+### 윈도우 함수 기본 사용법
+
+```mysql
+AGGREGATE_FUNC() OVER(<partition> <order>) AS window_func_column
+```
+
+- `AGGREGATE_FUNC()`: 윈도우 함수로 사용되는 집계 함수(예: `SUM`, `AVG`, `ROW_NUMBER` 등).
+- `PARTITION BY`: 윈도우 함수가 적용될 때 데이터를 분할하는 기준. 예를 들면, `PARTITION BY`를 사용하여 국가별, 제품별 등으로 데이터를 나누어 연산을 수행할 수 있다.
+- `ORDER BY`: 연산을 수행할 행의 순서를 결정. 예를 들어, 날짜별로 데이터를 정렬하여 연속된 날짜에 대한 누적 합계를 계산할 수 있다.
+
+OVER절에 만들어진 그룹(group)을 파티션 또는 윈도우 라고 한다.
+
+**직원들의 입사 순서를 조회하는 쿼리**
+
+```mysql
+SELECT e.*,
+			RANK() OVER(ORDER BY e.hire_date) AS hire_date_rank
+FROM employees e;
+```
+
+* 위 쿼리는 전체 결과 집합에서 순위를 매김
+
+부서별로 입사 순위를 매기고자 한다면 부서 코드로 파티션을 하면 된다.
+
+```mysql
+SELECT 
+    de.dept_no, 
+    e.emp_no, 
+    e.first_name, 
+    e.hire_date, 
+    RANK() OVER(PARTITION BY de.dept_no ORDER BY e.hire_date) AS hire_date_rank 
+FROM 
+    employees e 
+INNER JOIN 
+    dept_emp de ON de.emp_no = e.emp_no 
+ORDER BY
+    de.dept_no, e.hire_date ;
+```
+
+* `PARTITION BY` 절에서 "파티션"은 데이터를 특정 기준으로 분할하는 역할. 즉, 파티션은 윈도우 함수가 적용될 데이터의 서브셋
+
+또한 저 파티션 안에서도 연산 대상 레코드 별로 소그룹을 지정할 수 있다.
+
+**이를 프레임이라고 한다.**
+
+프레임은 다음과 같이 정의할 수 있다.
+
+```mysql
+AGGREGATE_FUNC() OVER(<partition> <order> <frame>) AS window_func_column
+
+frame:
+	{ROWS | RANGE} {frame_start | frame_between}
+
+frame_between:
+	BETWEEN frame_start AND frame_end
+
+frame_start, frame_end {
+	CURRENT ROW
+	| UNBOUNDED PRECEDING
+	| UNBOUNDED FOLLOWING
+  | expr PRECEDING
+  | expr FOLLOWING
+}
+```
+
+프레임을 만드는 기준으로 RONS와 RANGE 중 하나를 선택할 수 있다. 
+
+- ﻿﻿ROWS: 레코드의 위치를 기준으로 프레임을 생성
+- ﻿﻿RANGE: ORDER BY 절에 명시된 칼럼을 기준으로 값의 범위로 프레임 생성
+
+프레임의 시작과 끝을 의미하는 키워드들의 의미는 다음과 같다. (frame_start, frame_end)
+
+- ﻿﻿CURRENT ROW: 현재 레코드
+- ﻿﻿UNBOUNDED PRECEDING: 파티션의 첫 번째 레코드
+- ﻿﻿UNBOUNDED FOLLOWING: 파티션의 마지막 레코드
+- ﻿﻿expr PRECEDING: 현재 레코드로부터 n번째 이전 레코드
+- ﻿﻿expr FOLLOWING: 현재 레코드로부터 n번째 이후 레코드
+
+```mysql
+SELECT 
+    emp_no, 
+    from_date, 
+    salary,
+
+    -- 현재 레코드의 from_date를 기준으로 1년 전부터 지금까지 급여 중 최소 급여
+    MIN(salary) OVER(
+        ORDER BY from_date 
+        RANGE INTERVAL 1 YEAR PRECEDING
+    ) AS min_1,
+
+    -- 현재 레코드의 from_date를 기준으로 1년 전부터 2년 후까지의 급여 중 최대 급여
+    MAX(salary) OVER(
+        ORDER BY from_date 
+        RANGE BETWEEN INTERVAL 1 YEAR PRECEDING AND INTERVAL 2 YEAR FOLLOWING
+    ) AS max_1,
+
+    -- from_date 칼럼으로 정렬 후, 첫 번째 레코드부터 현재 레코드까지의 평균
+    AVG(salary) OVER(
+        ORDER BY from_date 
+        ROWS UNBOUNDED PRECEDING
+    ) AS avg_1,
+
+    -- from_date 칼럼으로 정렬 후, 현재 레코드를 기준으로 이전 건부터 이후 레코드까지의 급여 평균
+    AVG(salary) OVER(
+        ORDER BY from_date 
+        ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING
+    ) AS avg_2
+
+FROM 
+    salaries
+WHERE 
+    emp_no = 10001;
+
+```
+
+결과
+
+```
++--------+------------+--------+-------+-------+------------+------------+
+| emp_no | from_date  | salary | min_1 | max_1 | avg_1      | avg_2      |
++--------+------------+--------+-------+-------+------------+------------+
+|  10001 | 1986-06-26 |  60117 | 60117 | 66074 | 60117.0000 | 61109.5000 |
+|  10001 | 1987-06-26 |  62102 | 60117 | 66596 | 61109.5000 | 62764.3333 |
+|  10001 | 1988-06-25 |  66074 | 62102 | 66961 | 62764.3333 | 64924.0000 |
+```
+
+다음 윈도우 함수들은 프레임이 고정되어 있어 사용자가 SQL로 별도로 프레임을 명시해도 무시된다.
+
+자동으로 프레임이 파티션의 전체 레코드로 설정된다
+
+| 윈도우 함수    | 설명                                                         |
+| -------------- | ------------------------------------------------------------ |
+| CUME_DIST()    | 현재 행의 누적 분포 값을 반환합니다.                         |
+| DENSE_RANK()   | 중복 값 없이 순위를 부여합니다.                              |
+| LAG()          | 현재 행보다 지정된 수만큼 이전의 행의 값을 반환합니다.       |
+| LEAD()         | 현재 행보다 지정된 수만큼 다음의 행의 값을 반환합니다.       |
+| NTILE(n)       | 결과 집합을 n 개의 대략적으로 같은 크기의 그룹으로 나눕니다. |
+| PERCENT_RANK() | 현재 행에 대한 백분위 순위 값을 계산합니다.                  |
+| RANK()         | 중복 값을 허용하면서 순위를 부여합니다.                      |
+| ROW_NUMBER()   | 결과 집합의 각 행에 고유한 숫자를 부여합니다.                |
+
+### 윈도우 함수
+
+MySOL 서버의 윈도우 함수에는 집계 함수와 비 집계 함수를 모두 사용할 수 있다. 
+
+집계 함수는 OVER() 절 없이 단독으로도 사용될 수 있고 OVER() 절을 가진 윈도우 함수로도 사용될 수 있다.
+
+그러나 비 집계 함수는 반드시 OVER() 절을 가지고 있어야 하며 윈도우 함수로만 사용될 수 있다. 
+
+#### **집계 함수(Aggregate Function)**
+
+| 집계 함수(Aggregate Function) | 설명                           |
+| ----------------------------- | ------------------------------ |
+| AVG()                         | 평균 값 반환                   |
+| BIT AND()                     | AND 비트 연산 결과 반환        |
+| BIT OR()                      | OR 비트 연산 결과 반환         |
+| BIT XOR()                     | XOR 비트 연산 결과 반환        |
+| COUNT()                       | 건수 반환                      |
+| JSON_ARRAYAGG()               | 결과를 JSON 배열로 반환        |
+| JSON_OBJECTAGG()              | 결과를 JSON OBJECT 배열로 반환 |
+| MAX()                         | 최댓값 반환                    |
+| MIN()                         | 최솟값 반환                    |
+| STDDEV_POP(), STDDEV(), STD() | 표준 편차 값 반환              |
+| STDDEV_SAMP()                 | 표본 표준 편차 값 반환         |
+| SUM()                         | 합계 값 반환                   |
+| VAR_POP(), VARIANCE()         | 표준 분산 값 반환              |
+| VAR_SAMP()                    | 표본 분산 값 반환              |
+
+#### 비 집계 함수(Non-Aggregate Function)
+
+| 비 집계 함수(Non-Aggregate Function) | 설명                                                         |
+| ------------------------------------ | ------------------------------------------------------------ |
+| CUME_DIST()                          | 누적 분포 값 반환 (파티션별 현재 레코드보다 작거나 같은 레코드의 누적 백분율) |
+| DENSE_RANK()                         | 랭킹 값 반환(Gap 없음) (동일한 값에 대해서는 동일 순위를 부여하며, 동일한 순위가 여러 건이어도 한 건으로 취급) |
+| FIRST_VALUE()                        | 파티션의 첫 번째 레코드 값 반환                              |
+| LAG()                                | 파티션 내에서 파라미터(N)를 이용해 N번째 이전 레코드 값 반환 |
+| LAST_VALUE()                         | 파티션의 마지막 레코드 값 반환                               |
+| LEAD()                               | 파티션 내에서 파라미터(N)를 이용해 N번째 이후 레코드 값 반환 |
+| NTH_VALUE()                          | 파티션의 n번째 값 반환                                       |
+| NTILE()                              | 파티션별 전체 건수를 파라미터(N)로 N-등분한 값 반환          |
+| PERCENT_RANK()                       | 퍼센트 랭킹 값 반환                                          |
+| RANK()                               | 랭킹 값 반환(Gap 있음)                                       |
+| ROW_NUMBER()                         | 파티션의 레코드 순번 반환                                    |
+
+### DENSE_RANK()와 RANK(), ROW_NUMBER()
+
+DENSE_RANK()와 RANK()는 ORDER BY 기준으로 매겨진 순위를 반환한다.
+
+1. **RANK()** : 동일한 값에 대해서 동일한 랭크를 부여하고 랭킹에 갭이 있다.
+   - **설명**: 레코드들을 지정된 순서대로 랭킹을 부여. 만약 두 레코드가 동일한 값을 가질 경우, 둘 다 동일한 랭크를 받고  다음 랭크는 건너뛴다.
+   - 예시: A(10), B(20), C(20), D(30)
+     - RANK() 결과: A(1), B(2), C(2), D(4)
+2. **DENSE_RANK()** 동일한 값에 동일한 랭크를 부여하지만, 랭킹에 갭이 없다. 
+   - **설명**: `RANK()`와 비슷하게 레코드들에게 랭킹을 부여하지만, 랭킹에 갭이 없다.
+   - 예시: A(10), B(20), C(20), D(30)
+     - DENSE_RANK() 결과: A(1), B(2), C(2), D(3)
+3. **ROW_NUMBER()** : 모든 레코드에 대해 고유한 순서 번호를 부여
+   - **설명**: 각 레코드에 동일한 값이 있더라도 고유한 순서 번호를 부여
+   - 예시: A(10), B(20), C(20), D(30)
+     - ROW_NUMBER() 결과: A(1), B(2), C(3), D(4)
+
+#### LAG()와 LEAD()
+
+`LAG()`와 `LEAD()`는 SQL의 윈도우 함수로, 현재 행을 기준으로 이전 또는 다음 행의 데이터에 접근할 때 사용된다. 이 두 함수는 주로 현재 행과 이전 행 또는 다음 행 간의 데이터를 비교하거나 계산할 때 유용하다.
+
+1. **LAG()**
+   - **설명**: `LAG()` 함수는 현재 행에서 지정된 수만큼 이전 행의 데이터를 반환.
+   - **사용**: `LAG(column, n, default_value)`로 사용되며, 여기서 `n`은 현재 행에서 멀리 떨어진 이전 행의 수를 나타내고, `default_value`는 이전 행이 없을 경우 반환할 기본값을 지정. `n`과 `default_value`는 선택적이며, 기본적으로 `n=1`.
+   - 예시 : A(10), B(20), C(30)
+     - `LAG(column, 1)` 결과: A(NULL), B(10), C(20)
+2. **LEAD()**
+   - **설명**: `LEAD()` 함수는 현재 행에서 지정된 수만큼 다음 행의 데이터를 반환.
+   - 1, 2 파라미터는 필수이며 세번째는 선택 사항이다.
+   - **사용**: `LEAD(column, n, default_value)`로 사용되며, 여기서 `n`은 현재 행에서 멀리 떨어진 다음 행의 수를 나타내고, `default_value`는 다음 행이 없을 경우 반환할 기본값을 지정한다. `n`과 `default_value`는 선택적이며, 기본적으로 `n=1`.
+   - 예시 : A(10), B(20), C(30)
+     - `LEAD(column, 1)` 결과: A(20), B(30), C(NULL)
+
+### 윈도우 함수와 성능
+
+아직 인덱스를 이용한 최적화가 부족한 부분도 있다.
+
+쿼리 요건에 따라 기존 기능으로 윈도우 함수를 대체할 수는 없지만, 가능하다면 너무 윈도우 함수에 의존하지 말자.
+
+배치프로그램같은 OLAP 시스템에서는 윈도우 함수를 적용해도 상관없지만, OLTP 시스템에서는 가능하면 피하자.
+
+
+
+## 잠금을 사용하는 SELECT (Lock)
+
+FOR SHARE(s-lock), FOR UPDATE(x-lock)이 있다.
+
+InnoDB 스토리지 엔진에서는 잠금 없는 읽기 (Non Locking Consistent Read)가 지원되기 때문에
+
+For UPDATE(x-lock)에 의해 잠겨져있어도 단순 SELECT 쿼리는 아무런 대기 없이 실행된다.
+
+* FOR share, FOR UPDATE 를 섞은 요청만 대기한다.
+
+### 잠금 테이블 선택 (여러 테이블 LOCK)
+
+````mysql
+SELECT * 
+FROM employees e
+INNER JOIN dept_emp de ON de.emp_no = e.emp_no
+INNER JOIN departments d ON d.dept_no = de.dept_no
+FOR UPDATE
+````
+
+3개 테이블에서 읽은 모든 테이블에 X-LOCK을 걸게 된다
+
+dept_emp, departments 테이블은 락을 안걸고 읽고만 싶다면? 
+
+FOR UPDATE 뒤에  OF 테이블 절을 추가하면 해당 테이블만 걸게 된다
+
+```mysql
+SELECT * 
+FROM employees e
+INNER JOIN dept_emp de ON de.emp_no = e.emp_no
+INNER JOIN departments d ON d.dept_no = de.dept_no
+FOR UPDATE OF e // de랑 d는 걸지 않음
+```
+
+### NOWAIT & SKIP LOCKED
+
+ 트랜잭션에서의 락 대기 동작을 조절하는 옵션. 
+
+보통 락은 기본적으로 50초이다(innodb_lock_wait_timeout 시스템 변수)
+
+만약 락이 걸렸는데 대기하지 않고 무시하고 즉시 에러를 반환하고 싶다면?
+
+SELECT 쿼리 마지막에 `NOWAIT 옵션`을 사용하면 된다.
+
+```mysql
+SELECT * FROM employees FOR UPDATE NOWAIT
+```
+
+* 잠금이 없다면 잠금이 걸리고, 있다면 에러를 반환하면서 바로 종료된다.
+
+`SKIP LOCKED` 옵션은 레코드가 이미 락에 걸려있다면 에러를 반환하지 않고, 잠금이 걸린 레코드는 무시하고 잠금이 걸리지 않은 레코드만 가져온다.
+
+```
+SELECT * FROM table_name WHERE id = 1 FOR UPDATE SKIP LOCKED;
+```
+
+만약 `id = 1`에 해당하는 레코드가 락이 걸려있다면, 위의 쿼리는 아무런 결과를 반환하지 않는다.
+
+그런데 두 건 이상의 레코드를 조회한다면 잠긴 행은 스킵하고 다음 행을 가져온다.
+
+때문에 SKIP LOCKED 절을 가진 SELECT 구문은 NOT_DETERMINISTIC(확정적이지않은) 쿼리가 된다.
+
+> 이렇게 비확정적인 쿼리는 문장(STATEMENT) 기반의 복제에서 소스 서버와 레플리카 서버의 데이터를 다르게 만들 수도 있다. 그래서 가능하면 복제의 바이너리 로그 포맷으로 STATEMENT보다는 ROW 또는 MIXED를 사용하자.
+
+FOR UPDATE SKIP LOCKED는 MySQL 서버로 동시에 유입된 트랜잭션들이 대기 시간 없이 잠긴 레코드를 스킵하고 사용 가능한 레코드를 찾기만 하면 즉시 트랜잭션 처리를 시작할 수 있기 대문에 처리량이 더 높다.
+
+`SKIP LOCKED` 옵션은 특히 큐(QUEUE) 처리나 작업 분배와 같은 패턴에서 유용하다. 
+
+예를 들어 쿠폰 발급 기능 등이다.
+
+- ﻿﻿하나의 쿠폰은 한 사용자만 사용 가능하다.
+- ﻿﻿쿠폰의 개수는 1000개 제한이며, 선착순으로 요청한 사용자에게 발급한다.
+
+```mysql
+mysql> BEGIN;
+mysq1> SELECT * FROM coupon
+			 WHERE owned_user_id=0 ORDER BY coupon_id ASC LIMIT 1 FOR UPDATE;
+			 SKIP LOCED
+...응용 프로그램 연산 수행 ...
+
+mysql> UPDATE coupon SET owned _user_id=? WHERE coupon_id=?;
+mysql> COMMIT:
+```
+
+이것도 마찬가지 MySQL 서버 레플리케이션에 주의해야 한다.
+
+비확정적인 쿼리는 레플리카에서 다르게 실행될 가능성이 있기 때문이다. 
+
+`FOR UPDATE`와 `SKIP LOCKED` 옵션은 현재 잠긴 행을 건너뛰고 잠금이 설정되지 않은 첫 번째 행을 선택하므로 원본 서버와 복제 서버의 데이터가 시간 지연이 발생해서 동기화 되지 않을 수 있다.
+
+
+
 
 
 ## 정리
