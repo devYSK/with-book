@@ -1,0 +1,9 @@
+
+|
+java:S1149"_Replace the synchronized class "StringBuffer" by an unsynchronized one such as "StringBuilder".(í…Ò‰8’š‚Õ1
+`
+java:S1124"EReorder the modifiers to comply with the Java Language Specification.(Çñâøÿÿÿÿ
+`
+java:S1124"EReorder the modifiers to comply with the Java Language Specification.(¾ Œüÿÿÿÿ
+t
+java:S2142"^Either re-interrupt this method or rethrow the "InterruptedException" that can be caught here.(”ı¾

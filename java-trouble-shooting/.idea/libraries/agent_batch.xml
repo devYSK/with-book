@@ -1,0 +1,10 @@
+<component name="libraryTable">
+  <library name="agent.batch">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/scouter/agent.batch/scouter.agent.batch.jar!/" />
+      <root url="jar://$PROJECT_DIR$/scouter/agent.batch/scouter-agent-batch-2.20.0.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

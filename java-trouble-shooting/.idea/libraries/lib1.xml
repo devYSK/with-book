@@ -1,0 +1,17 @@
+<component name="libraryTable">
+  <library name="lib1">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/scouter/scouter.client.app/Contents/Eclipse/configuration/org.eclipse.osgi/101/0/.cp/lib/opal-1.0.3.jar!/" />
+      <root url="jar://$PROJECT_DIR$/scouter/scouter.client.app/Contents/Eclipse/configuration/org.eclipse.osgi/101/0/.cp/lib/opencsv-2.4.jar!/" />
+      <root url="jar://$PROJECT_DIR$/scouter/scouter.client.app/Contents/Eclipse/configuration/org.eclipse.osgi/101/0/.cp/lib/scouter.server.jar!/" />
+      <root url="jar://$PROJECT_DIR$/scouter/scouter.client.app/Contents/Eclipse/configuration/org.eclipse.osgi/101/0/.cp/lib/jaxb-api-2.3.1.jar!/" />
+      <root url="jar://$PROJECT_DIR$/scouter/scouter.client.app/Contents/Eclipse/configuration/org.eclipse.osgi/101/0/.cp/lib/jaxb-impl-2.3.0.1.jar!/" />
+      <root url="jar://$PROJECT_DIR$/scouter/scouter.client.app/Contents/Eclipse/configuration/org.eclipse.osgi/101/0/.cp/lib/jaxb-core-2.3.0.1.jar!/" />
+      <root url="jar://$PROJECT_DIR$/scouter/scouter.client.app/Contents/Eclipse/configuration/org.eclipse.osgi/101/0/.cp/lib/activation-1.1.1.jar!/" />
+      <root url="jar://$PROJECT_DIR$/scouter/scouter.client.app/Contents/Eclipse/configuration/org.eclipse.osgi/101/0/.cp/lib/hibernate-core-3.3.2.GA.jar!/" />
+      <root url="jar://$PROJECT_DIR$/scouter/scouter.client.app/Contents/Eclipse/configuration/org.eclipse.osgi/101/0/.cp/lib/scouter.common.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

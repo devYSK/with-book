@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="scouter-server-boot">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/scouter/server/scouter-server-boot.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

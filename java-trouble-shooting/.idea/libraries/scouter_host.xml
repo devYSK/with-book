@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="scouter.host">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/scouter/agent.host/scouter.host.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>

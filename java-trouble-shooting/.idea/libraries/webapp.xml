@@ -1,0 +1,10 @@
+<component name="libraryTable">
+  <library name="webapp">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/scouter/webapp/scouter-webapp-2.20.0.jar!/" />
+      <root url="jar://$PROJECT_DIR$/scouter/webapp/scouter.webapp.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
