@@ -467,9 +467,9 @@ OOME 에러는 보통 아래와 같이 두 가지 유형으로 크게 구분할 
 
 
 
-해결하기 쉬운 방법은 -Xmx 옵션을 사용하여 힙메모리 증가 시키는 법이 있다. 그러나 GC Time의 증가를 동반한다.
+해결방법1.  -Xmx 옵션을 사용하여 힙메모리 증가 시키는 법이 있다. 그러나 GC Time의 증가를 동반한다.
 
-두 번째 방법은 힙덤프 분석으로 많은 메모리를 사용하는 로직을 찾아 수정해야 한다.
+2. 힙덤프 분석으로 많은 메모리를 사용하는 로직을 찾아 수정해야 한다.
 
 
 
@@ -481,41 +481,157 @@ Jvm 기동시 로딩되는 Class 또는 String 수가 많으면 OOM PermGen spac
 
 
 
+## OOME 분석 툴
 
-
-## 2. OOME 발생 원인 및 해결 방법
-
-
-
-## 3. OOME 분석 툴
+1. VisuamVM -> 쓰레드모니터링, 메모리 모니터링, 쓰레드 덤프 및 힙 덤프
+2. Jmap -> 힙 덤프
+3. MAT -> 이클립스 기반 메모리 분석 툴 
 
 
 
-3. JVM Sychronization이란?
+# JVM Sychronization이란?
 
-3.1 개요 ㆍㆍㆍㆍㆍㆍㆍ 94
+WAS에서는 동시사용자를 처리하기 위해 수십~수백개의 쓰레드를 사용하는데, 두개이상의 쓰레드가 같은 자원을 이용하면 필연적으로 경합이 발생한다. 때로는 데드락도 발생한다. 
 
-1) Java 그리고 Thread
-2) Thread 동기화
-3) Mutual Exclusion과 Critical Section
-4) Monitor
+## Thread 동기화
 
-3.2 Java의 동기화(Synchronization) 방법 ㆍㆍㆍㆍㆍㆍㆍ 96
+Java에서는 Morinot를 이용해 쓰레드를 동기화 한다. 모든 자바 객체는 하나의 Monitor만 가지며 하나의 쓰레드만 소유할 수 있다.
 
-1) Synchronized Statement
-2) synchronized Method
-3) Wait And Notify
-4) synchronized Statement와 synchronized Method 사용
+자바에서 Monitor를 점유하는 유일한 방법은 Synchronized 키워드를 사용하는 것이다. 
 
-3.3 Thread 상태 ㆍㆍㆍㆍㆍㆍㆍ 101
-3.4 Thread의 종류 ㆍㆍㆍㆍㆍㆍㆍ 102
-3.5 JVM에서의 대기 현상 분석 ㆍㆍㆍㆍㆍㆍㆍ 102
-3.6 Thread Dump 104
-3.7 Case별 synchronized에 대한 Thread Dump 분석 ㆍㆍㆍㆍㆍㆍㆍ 105
+## Mutual Exclusion과 CriticalSection
 
-1) 동기화 방식별 소스 코드
-2) Hot Spot JVM 실행 분석
-3) IBM JVM 실행 분석
+Heap에는 객체의 멤버변수가 있는데, JVM은 해당 객체와 클래스를 ObjectLock을 사용해 보호한다.
+
+Object Lock은 한번에 한 쓰레드만 객체를 사용하게끔 내부적으로 Mutex등을 활용하다. 
+
+이 Synchronization은 DBMS의 Lock과 다르다. DB는 SELECT(락 제외)는 락을 안걸지만, 쓰기는 발생할 수 있다. 
+
+그러나 자바는 Synchronization 영역에 들어가면 무조건 동기화를 수행한다. 
+
+![image-20240203010359352](./images//image-20240203010359352.png)
+
+Java Synchronization 성능이 왜 안좋을까?
+
+* 용어부터 정리
+  * **EntrySet**: 일반적으로 "EntrySet"은 공유 자원에 접근을 시도하는 스레드들의 집합. 자원을 기다리고 있는 상태
+  * **WaitSet**: "WaitSet"은 자원을 획득한 후에 특정 조건이 만족될 때까지 대기하고 있는 스레드들의 집합을 의미. 대기 큐를 "WaitSet"이라고 할 수 있다.
+* 쓰레드는 wait()을 호출하면 조건 변수에 대해 대기 상태로 진입되고 블락이된다. 대기 큐(wait set)으로 이동한다. 
+
+ `synchronized` 블록이나 메소드를 사용할 때, 스레드는 이 락을 획득해야 하고 이 락은 오직 한 스레드만이 가질 수 있다. 다른 스레드가 락을 가지고 있으면, 획득을 시도하는 스레드는 블록되거나 대기 상태가 되기 때문이다.
+
+Entry Set에서 획득을 시도하지만 얻지 못한다면 계속 대기하게 된다. 
+
+wait set에 들어온 쓰레드가 임계구역을 벗어나는 방법을 monitor를 다시 획득해 Lock을 놓고 나가는 방법 뿐이다. 
+
+때문에 성능이 좋지않다.
+
+이 Monitor를 이용하거나 OS의 자원인 mutex등을 이용한 Lock을 Hevy Lock이라고 하며, Atomoic 연산을 이용한 락을 Light-weight Lock 이라고 한다. 
+
+## Thread 상태
+
+<img src="./images//image-20240203011625939.png" width = 650>
+
+* Thread의 상태는 Thread 클래스 내부에 State라는 Enum으로 선언되어 있다.
+
+- ﻿﻿NEW: Thread가 생성되었지만 아직 실행되지 않은 상태
+- ﻿﻿RUNNABLE: 현재 CPU를 점유하고 작업을 수행 중인 상태. 운영체제의 자원 분배로 인해 WAITING 상태가 될 수도 있다.
+- ﻿﻿BLOCKED: Monitor를 획득하기 위해 다른 Thread가 Lock을 해제하기를 기다리는 상태
+- ﻿﻿WAITING: wait() , join() Method, park() Method 등 을 이용해 대기하고 있는 상태
+- ﻿﻿TIMED_WAITING: sleep(), wait(), join(), park() Method등을 이용해 대기하고 있는 상태. 
+  - WAITING 상태와의 차이점은 Method의 인수로 최대 대기 시간을 명시 할 수 있어 외부적인 변화뿐만 아니라 시간에 의해서도 WAITING 상태가 해제될 수 있다는 것이다.
+
+## Thread 종류
+
+데몬 쓰레드와 논데몬 쓰레드로 나눌 수 있다. 데몬 쓰레드는 다른 `비데몬(논데몬)쓰레드가 없다면 동작을 중지한다.`
+
+main()으로 실행되는 쓰레드는 비데몬 쓰레드로 생성되고, 이 쓰레드가 중지하면 다른 데몬 쓰레드도 동작을 중지한다.
+
+- ﻿﻿`VM Background Thread`: Compile, Optimization, Garbage Collection 등 JVM 내부의 일을 수
+   행하는 Background Thread 들이다.
+- `Main Thread`: main(String[] args) Method를 실행하는 Thread로 사용자가 명시적으로 Thread를 수행하지 않더라도 JVM은 하나의 Main Thread를 생성해서 애플리케이션을 구동한다.
+  -  Hot Spot JVM에서는 VM Thread라는 이름이 부여된다.
+- ﻿`﻿User Thread`: 사용자에 의해 명시적으로 생성된 Thread 들이다. Javalang.Thread를 상속
+   (extends)받거나, Javalang, Runnable 인터페이스를 구현(implements)함으로써 User Thread 를 생성할 수 있다.
+
+## Thread Dump
+
+쓰레드 덤프 생성방법
+
+* kill -3 [pid]
+* jstack [pid]
+
+
+
+## Thread Dump를 통한 Thread 동기화 문제 해결의 실 사례
+
+실제 운영 환경에서 성능 문제가 발생한 경우에 추출한 것으로 Thread Dump를 분석한 결과 많은 수의 Worker Thread들이 다음과 같이 블로킹되어 있었다.
+
+<img src="./images//image-20240203012852010.png" width = 750>
+
+* 컨넥션을 얻는 과정에서 Synchronized에 의한 스레드 블록킹 발생.
+* Connection Pool에서 얻는 과정에서 Thread 경합이 발생한 것으로, Pool이 완전히 소진되었고 새로운 DB Request에 새 Connection을 맺는 과정에서 성능 저하가 발생. 
+
+이문제를 해결하는 방법은 커넥션 풀의 초기 커넥션 수와 최대 커넥션 수를 키운다.
+
+* 만일, 실제 DB Request는 적은데 발생한다면 Connection 누수. 
+
+
+
+# 도구를 이용한 성능 분석
+
+
+
+## Thread Dump와 Stack Trace 정보.
+
+각각 스레드는 Stack이라는 고유 공간을 할당받고, 메소드 호출정보가 순서대로 저장이 되고 지역 변수정보가 저장된다.
+
+동적으로 생성되는 객체에 대한 정보는 Heap 영역에 저장된다. 
+
+CallStack은 메소드가 호출된 순서대로 각 스레드마다 순서대로 저장되며, 가장 마지막에 호출된 스레드가 가장 상위에 저장되는 구조이다. 
+
+## Heap Dump 정보
+
+**Heap Dump란?**
+
+Java Heap 메모리에 생성된 객체에 대한 정보를 특정 시점에 스냅샷 뜬 정보.
+
+생성된 객체와 객체의 필드 정보를 제공하며, 스레드 Call Stack정보도 포함된다.
+
+* 어떤 스레드가 어떤 객체를 사용하는지에 대한 정보도 파악 가능하다.
+
+**Heap Dump 파일은 어디에 사용될까**
+
+OOM 에러가 발생한원인 분석이 가능하고, 가장 메모리를 많이 사용하는 객체가 무엇인지 알 수 있다.
+
+OOM의 경우 보통 컬렉션 객체가 너무 많이 들고있고, 사용하지 않는데도 참조를 유지해서 GC가 되지 않아 발생하는 경우가 많다.
+
+
+
+Heap Dump 파일의 HPROF 2진 형식 데이터는 모든 데이터 뿐만 아니라 원시 데이터와 스레드 세부사항도 들어있다. 
+
+### Heap Dump 파일 생성 방법
+
+Heap Dump 파일 생성은 아래와 같이 생성 가능하다.
+
+```shell
+jcmd <pid> GC.heap_dump filename=<filename> 
+jmap -dump: live, format=b, file=heapdump.hprof <pid>
+```
+
+힙덤프 수행시 GC 수행 후 메모리 SnapShot을 수행하기 때문에 사용하지 않는 객체는 모두 GC에 의해 사라지고 Live 객체에 대한 정보만 Snapshot에 저장이 된다.
+
+* jmap 옵션에 live 옵션을 빼면 GC 수행 전의 스냅샷을 뜰 수 있다.
+
+Heap Dump시 애플리케이션이 중단되므로 런타임에는 주의하자. 
+
+## 객체 참조,  GC와 메모리 누수
+
+
+
+
+
+
 
 3.8 Thread Dump를 통한 Thread 동기화 문제 해결의 실 사례 ㆍㆍㆍㆍㆍㆍㆍ 113
 
