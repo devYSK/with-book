@@ -561,8 +561,6 @@ main()으로 실행되는 쓰레드는 비데몬 쓰레드로 생성되고, 이 
 * kill -3 [pid]
 * jstack [pid]
 
-
-
 ## Thread Dump를 통한 Thread 동기화 문제 해결의 실 사례
 
 실제 운영 환경에서 성능 문제가 발생한 경우에 추출한 것으로 Thread Dump를 분석한 결과 많은 수의 Worker Thread들이 다음과 같이 블로킹되어 있었다.
@@ -580,7 +578,7 @@ main()으로 실행되는 쓰레드는 비데몬 쓰레드로 생성되고, 이 
 
 # 도구를 이용한 성능 분석
 
-
+JDK 내장 분석 도구
 
 ## Thread Dump와 Stack Trace 정보.
 
@@ -588,7 +586,7 @@ main()으로 실행되는 쓰레드는 비데몬 쓰레드로 생성되고, 이 
 
 동적으로 생성되는 객체에 대한 정보는 Heap 영역에 저장된다. 
 
-CallStack은 메소드가 호출된 순서대로 각 스레드마다 순서대로 저장되며, 가장 마지막에 호출된 스레드가 가장 상위에 저장되는 구조이다. 
+CallStack은 메소드가 호출된 순서대로 각 스레드마다 순서대로 저장되며, **가장 마지막에 호출된 스레드가 가장 상위에 저장되는 구조**이다. 
 
 ## Heap Dump 정보
 
@@ -619,43 +617,184 @@ jcmd <pid> GC.heap_dump filename=<filename>
 jmap -dump: live, format=b, file=heapdump.hprof <pid>
 ```
 
-힙덤프 수행시 GC 수행 후 메모리 SnapShot을 수행하기 때문에 사용하지 않는 객체는 모두 GC에 의해 사라지고 Live 객체에 대한 정보만 Snapshot에 저장이 된다.
+**힙덤프 수행시 GC 수행 후 메모리 SnapShot을 수행하기 때문에 사용하지 않는 객체는 모두 GC에 의해 사라지고 Live 객체에 대한 정보만 Snapshot에 저장이 된다.**
 
-* jmap 옵션에 live 옵션을 빼면 GC 수행 전의 스냅샷을 뜰 수 있다.
+* jmap 옵션에` live 옵션을 빼면 GC 수행 전의 스냅샷을 뜰 수 있다.`
 
 Heap Dump시 애플리케이션이 중단되므로 런타임에는 주의하자. 
 
 ## 객체 참조,  GC와 메모리 누수
 
+GC root로부터 참조되면 GC 대상이 아니고, 참조가 끊기면 GC 대상이다.
+
+보통 메모리 누수의 이유는 사용되지 않는객체가 Gc root로부터 참조가 남아있어 유지되기 때문에 발생한다.
+
+Gc Root 목록
+
+* System Class Loader에 의해 로딩된 클래스
+* 스레드 stack 내의 local vairable 또는 parameter
+* Monitor로 사용된 객체 
+* 정적 변수 
+* JNI 메소드 및 전역 JNI 메소드
+
+가비지 컬렉터는 Gc root 객체들로 부터 시작해서 참조되지 않는 객체들을 GC하여 수거한다
+
+![image-20240404231550555](./images//image-20240404231550555.png)
+
+## Java Flight Recording 기능 사용하기
+
+JFR은 실행중인 자바 애플리케이션 진단 및 프로파일링 도구이다.
+
+CPU 프로파일링은 각 자바 메소드에서 소비되는 상대적 CPU 시간 양과 모든 시스템 함수를 계산한다.
+
+heap 프로파일링은 얼마나 힙 메모리를 사용하는지 어떤 객체가 할당되어있는지 진단하고 볼수있다.
+
+JFR프로파일링은 운영중인 시스템에 부하를 거의 주지 않기 때문에 운영중 시스템에 프로파일링 수행시 효과적으로 사용될 수 있다.
+
+JFR의 4가지 수집 event
+
+* instant event : 즉시 발행, 발생 즉시 로깅
+* duration event : 시작시간 종료시간 로깅. event 종료시 로깅
+* timed event : 특정 임계값이 초과된 이벤트만 기록
+* sample event : 일정한 시간 간격으로 활동 정보를 수집하기 위해 로깅
+
+
+
+## GC 메모리 분석 기능 사용 - 빠르게 메모리 파악
+
+```
+jcmd pid GC.class_historam > pic_ClassHistogram.txt
+// or
+jmap -histo pid 
+```
+
+FULL GC를 하고 Heap 메모리 점유율을 보여준다
+
+* jmap 같은경우 live 명령어를 빼면 죽은객체 포함해서 정보를 표시한다.
+
+IC 같은 Java 시그너처 형태는 아래의 값을 의미한다.
+
+* [Z = boolean 배열
+
+* [B = byte 배열
+
+* [s= short 배열
+
+* [I= int 배열
+
+* L = long 배열
+
+* [F= float 배열
+
+* [D = double 배열
+
+* [C= char 배열
+
+* [L= any non-primitives(Object) Java객체 배열
+
+![image-20240404233909677](./images//image-20240404233909677.png)
+
+힙덤프 파일은 IBM HeapAnalyzer, VisualVM 등으로 분석 가능하다.
+
+## Managerment Agent( JMX)
+
+JMX : Java 애플리케이션 관리하고 모니터링 하기 위한 도구.
+
+기본적으로 제공하며 하드웨어 등에 대한 인터페이스도 제공하여 외부에서 통계 및 수집할 수 있다.
+
+### JMX 용어
+
+- ﻿Manageable Resource : 관리대상이 되는 리소스(애플리케이션, 장비)
+- ﻿﻿MBean : Managed bean의 약자. Manageble Resource에 대한 접근 및 조작에 대한 interface를 제공
+- ﻿MBean Server : MBean을 등록. MBean Server를 통해 JHX 관리 Application에 정보 제공
+- ﻿Management Application : JMX 활용 App을 관리하는 애플리케이션. Protocol Adapter와 Connetor을
+   통해 외부 원격 management application에 접근을 제공한다. (JConsole, INC 등)
+
+### JMX 아키텍처
+
+관리 대상 리소스에 MBean을 설치하고 MBean Server(JMX Agent)에 등록되어 관리된다.
+
+MBean Server가 외부 Managent Application으로 연결되어 Managerment Application을 이용해서 ManageableResource를 관리 및 감시한다.
+
+![image-20240404234245374](./images//image-20240404234245374.png)
+
+JMX 아키텍처를 간단히 표현하면 아래와 같은 연결 구조를 가지고 있다.
+
+* Manageable Resource(관리 대상 Java App) <- MBean <-MBean Server <-Management Application
+
+JMX 관리기능 on/off 방법
+
+```
+jcmd <pid> MAnagermentAgent.start : 원격 JMX 켜기
+jcmd pid ManagermentAgent.start_local : 로컬 JMX 켜기 
+jcm pid ManagermentAgent.stop : JMX 끄기 
+```
+
+## JCM 도구 vs 다른 도구 비교
+
+![image-20240404234419844](./images//image-20240404234419844.png)
+
+
+
+# Java Misson Control 도구의 활용
+
+
+
+## 실시간 모니터링
+
+JMC를 기동하고 원격 JVM의 ip, port로 접속할 수 있다.
+
+<img src="./images//image-20240404234703216.png" width =450 height = 450>
+
+Memory 탭에서 JVM 메모리 영역의 모든 상황을 볼 수 있다.
+
+Threads 탭에서 실행중인 스레드와 Stack 정보와 아래 정보를 제공한다.
+
+* 스레드 명
+
+* 스레드 상태 정보 : RUNNABLE, TIMED_WAITING, WAITING 등
+
+* Lock이 걸린 인스턴스 이름
+
+*  스레드가 BIoCK된 횟수
+
+* 스레드 실행 후 할당된 메모리 크기
+
+* 스레드별 CPU 사용률
+
+### GC 관련 JVM 옵션
+
+![image-20240404235052982](./images//image-20240404235052982.png)
+
+### TLAB을 이용한 성능향상 (Thread Local Allocation Buffer)
+
+TLAB는 Thread Local Allocation Buffer의 약자로, Heap의 Young Generation 중 Eden 영역에 여러 스레드가 동시에 메모리 할당 시에 스레드 간 경합에 의한 성능감소 문제 해결을 위해 `각각의 스레드 별로 메모리 영역을 개별로 할당하여 성능향상을 도모`한 Heap 메모리 할당 방식이다.
+
+TLAB에 할당된 객체는 성능이 향상되지만 경합이 발생하는 TLAB 바깥 영역에 객체가 할당이 되면 성능이 떨어지게 된다. 객체 할당 시에 TLAB에 충분한 크기의 공간이 없는 경우에 TLAB 바 깥 영역에 객체가 할당될 수 있다.
+
+`TLAB의 크기를 옵션을 통해 적절히 조절하여 성능 향상을 구현할 수 있다`. 큰 객체를 많이 할 당하는 어플리케이션, 에덴의 크기에 비해 상대적으로 스레드의 개수가 많은 어플리케이션은 TLAB 튜닝으로 상당한 이익을 얻을 수 있다. TLAB 튜닝은 JER 모니터링을 통해 TLAB 바깥에 얼마나 많은 메모리가 할당되는지 확인하고, 객체들의 평균, 최대 크기를 확인한 다음에 TLAB 의 크기를 평균 객체들의 크기로, 또는 조금 더 크게 조절하여 튜닝한다.
+
+**TLAB의 옵션**
+
+* -XX:-UseTLAB default: -XX: +UseTLAB)
+  * TLAB의 사용을 중단한다. TLAB를 사용하면 성능이 향상된다. default는 사용하는 것이다.
+
+* -XX: TLABSize=N (default: 0)
+  * TLAB의 크기를 지정한다. 0으로 지정되면 Eden 크기에따라 자동으로 크기가 조정된다. 
+  * 즉, Eden 크기가 증가하면 TLAB의 크기도 증가한다. GC가 발생할 때마다 Eden 크기가 변경되므로 TLAB의 크기도 변경된다. GC가 발생할 때마다 크기가 변경되는 것을 방지하려면 -XX:-ResizeTLAB을 추가해야한다. TLAB 을 튜닝할 때는 크기가 계속 변경되면 하기 힘드므로, 추가하는 것이 좋다.
+
+- ﻿XX: TLABWasteTargetPercent=N(default: 1)
+   새로 할당될 객체의 크기가 (TLAB 크기) * (이 옵션에 지정된 퍼센트값)• 보다 작은 경우에는 TLAB 바깥 영역에 할당하고, 큰 경우에는 TLAB를 버리고 새로 시작한다.
+- ﻿XX: TLABWasteIncrement=N ( default :4 )
+   TLAB 바깥에 할당이 이루어 질때마다 TLABWasteTargetPercent의 값을 N씩 증가시킨다. TLAB가 버려질 가능성을 점점높혀서 객체가 7속 TLAB 바깥에 할당되는 것을 방지한다.
+
+# 성능분석 도구들 비교
+
+![image-20240405000357461](./images//image-20240405000357461.png)
 
 
 
 
-
-
-3.8 Thread Dump를 통한 Thread 동기화 문제 해결의 실 사례 ㆍㆍㆍㆍㆍㆍㆍ 113
-
-“도구(Tool)를 이용한 성능분석”
-
-1. Java 성능분석 도구 개요
-
-1.1 JDK 내장 성능분석 도구 ㆍㆍㆍㆍㆍㆍㆍ 118
-1.2 3rd Party 성능분석 도구 ㆍㆍㆍㆍㆍㆍㆍ 120
-
-2. JVM Thread, 메모리 정보
-
-2.1 Thread Dump와 Stack Trace 정보 ㆍㆍㆍㆍㆍㆍㆍ 123
-2.2 Heap 메모리 구조 ㆍㆍㆍㆍㆍㆍㆍ 124
-2.3 Heap Dump 정보 ㆍㆍㆍㆍㆍㆍㆍ 126
-2.4 객체 참조, GC와 메모리 누수 ㆍㆍㆍㆍㆍㆍㆍ 128
-
-3. jcmd
-
-3.1 jcmd를 이용하여 Java 프로세스 정보 확인하기 ㆍㆍㆍㆍㆍㆍㆍ 129
-3.2 Java Flight Recording 기능 사용하기 ㆍㆍㆍㆍㆍㆍㆍ 134
-3.3 GC 메모리 분석 기능 사용하기 ㆍㆍㆍㆍㆍㆍㆍ 146
-3.4 Management Agent(JMX) 기능 사용하기 ㆍㆍㆍㆍㆍㆍㆍ 149
-3.5 jcmd 도구 vs 다른 도구 비교 ㆍㆍㆍㆍㆍㆍㆍ 152
 
 4. Java Mission Control 도구의 활용
 
