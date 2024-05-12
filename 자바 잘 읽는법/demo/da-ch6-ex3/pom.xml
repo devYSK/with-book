@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.ys</groupId>
+        <artifactId>demo</artifactId>
+        <version>0.0.1-SNAPSHOT</version> <!-- 상위 프로젝트와 일치 -->
+        <relativePath>../pom.xml</relativePath> <!-- 상위 디렉토리가 정확한지 확인 -->
+    </parent>
+    <groupId>org.example</groupId>
+    <artifactId>da-ch6-ex3</artifactId>
+    <version>0.0.1-SNAPSHOT</version> <!-- 이 또한 일관성을 위해 부모와 일치 -->
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+    </properties>
+</project>
+

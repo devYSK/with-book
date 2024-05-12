@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.2.5</version>
+        <relativePath/> <!-- lookup parent from repository -->
+    </parent>
+    <groupId>com.ys</groupId>
+    <artifactId>demo</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <modules>
+        <module>da-ch2-ex2</module>
+        <module>da-ch3-ex1</module>
+        <module>da-ch4-ex1</module>
+        <module>da-ch5-ex2</module>
+        <module>da-ch6-ex1</module>
+        <module>da-ch6-ex2</module>
+        <module>da-ch6-ex3</module>
+        <module>da-ch7-ex1</module>
+        <module>da-ch7-ex2</module>
+        <module>da-ch7-ex3</module>
+        <module>da-ch7-ex4</module>
+        <module>da-ch8-ex1</module>
+        <module>da-ch8-ex2</module>
+        <module>da-ch8-ex3</module>
+        <module>da-ch9-ex1</module>
+        <module>da-ch9-ex2</module>
+        <module>da-ch10-ex1</module>
+        <module>da-ch11-ex1</module>
+        <module>da-ch11-ex2</module>
+        <module>da-ch12-ex1</module>
+        <module>da-ch12-ex2</module>
+    </modules>
+    <name>demo</name>
+    <description>demo</description>
+    <properties>
+        <java.version>17</java.version>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>
