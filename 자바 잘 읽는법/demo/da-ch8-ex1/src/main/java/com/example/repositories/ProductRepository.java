@@ -23,8 +23,9 @@ public class ProductRepository {
   public Product findProduct(int id) throws SQLException {
     String sql = "SELECT * FROM product WHERE id = ?";
 
-    Connection con = dataSource.getConnection();
-    try (PreparedStatement statement = con.prepareStatement(sql)) {
+    try (
+        Connection con = dataSource.getConnection();
+        PreparedStatement statement = con.prepareStatement(sql)) {
       statement.setInt(1, id);
       ResultSet result = statement.executeQuery();
 
