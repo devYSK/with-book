@@ -22,6 +22,7 @@ public class JmxController {
     if (outputFile == null || outputFile.isBlank()) {
       throw new IllegalArgumentException("'file' argument must not be blank.");
     }
+
     jmxService.dumpHeap(outputFile, true);
   }
 
