@@ -1,0 +1,49 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.3.0'
+    id 'io.spring.dependency-management' version '1.1.5'
+}
+
+group = 'com.ys'
+version = '0.0.1-SNAPSHOT'
+
+java {
+    sourceCompatibility = '21'
+}
+
+subprojects {
+    bootJar.enabled = false
+    jar.enabled = false
+    compileJava.options.encoding = 'UTF-8'
+
+    apply plugin: 'java-library' //하위 모듈이 상위 모듈의 라이브러리를 의존할 수 있게 하는 플러그인
+    apply plugin: 'io.spring.dependency-management'
+    apply plugin: 'org.springframework.boot'
+
+    repositories {
+        mavenCentral()  // 이 줄을 추가하여 mavenCentral 저장소를 사용합니다.
+    }
+
+    test {
+        useJUnitPlatform()
+    }
+
+    dependencies {
+        testImplementation 'org.springframework.boot:spring-boot-starter-test'
+
+        // Lombok
+        compileOnly 'org.projectlombok:lombok'
+        annotationProcessor 'org.projectlombok:lombok'
+    }
+
+    configurations {
+        compileOnly {
+            extendsFrom annotationProcessor
+        }
+    }
+
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
