@@ -30,7 +30,7 @@ subprojects {
 
     dependencies {
         testImplementation 'org.springframework.boot:spring-boot-starter-test'
-
+        implementation("io.netty:netty-resolver-dns-native-macos:4.1.75.Final:osx-aarch_64")
         // Lombok
         compileOnly 'org.projectlombok:lombok'
         annotationProcessor 'org.projectlombok:lombok'
