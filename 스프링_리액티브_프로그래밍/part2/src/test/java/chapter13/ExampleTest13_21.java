@@ -10,7 +10,7 @@ import reactor.test.publisher.PublisherProbe;
 public class ExampleTest13_21 {
     @Test
     public void publisherProbeTest() {
-        PublisherProbe<String> probe =
+        PublisherProbe probe =
                 PublisherProbe.of(PublisherProbeTestExample.supplyStandbyPower());
 
         StepVerifier

@@ -5,6 +5,7 @@ import reactor.core.publisher.Flux;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.logging.Level;
 
 /**
  * log() operator를 사용한 예제
@@ -24,8 +25,8 @@ public class Example12_7 {
         Flux.fromArray(new String[]{"BANANAS", "APPLES", "PEARS", "MELONS"})
                 .map(String::toLowerCase)
                 .map(fruit -> fruit.substring(0, fruit.length() - 1))
-                .log()
-//                .log("Fruit.Substring", Level.FINE)
+                // .log()
+               .log("Fruit.Substring", Level.FINE)
                 .map(fruits::get)
                 .subscribe(
                         log::info,

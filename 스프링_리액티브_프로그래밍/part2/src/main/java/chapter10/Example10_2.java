@@ -14,7 +14,7 @@ public class Example10_2 {
         Flux.fromArray(new Integer[] {1, 3, 5, 7})
                 .doOnNext(data -> log.info("# doOnNext: {}", data))
                 .doOnSubscribe(subscription -> log.info("# doOnSubscribe"))
-                .publishOn(Schedulers.parallel())
+                .publishOn(Schedulers.parallel()) // 페러렐로 지정. onNext() 실행 쓰레드가 페러렐로 변경
                 .subscribe(data -> log.info("# onNext: {}", data));
 
         Thread.sleep(500L);

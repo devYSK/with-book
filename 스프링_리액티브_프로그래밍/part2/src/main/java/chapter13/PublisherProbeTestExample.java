@@ -4,8 +4,7 @@ import reactor.core.publisher.Mono;
 
 public class PublisherProbeTestExample {
     public static Mono<String> processTask(Mono<String> main, Mono<String> standby) {
-        return main
-                .flatMap(massage -> Mono.just(massage))
+        return main.flatMap(Mono::just)
                 .switchIfEmpty(standby);
     }
 

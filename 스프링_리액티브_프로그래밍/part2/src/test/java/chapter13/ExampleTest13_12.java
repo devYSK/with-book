@@ -15,6 +15,5 @@ public class ExampleTest13_12 {
                 .expectError()
                 .verifyThenAssertThat()
                 .hasDroppedElements();
-
     }
 }

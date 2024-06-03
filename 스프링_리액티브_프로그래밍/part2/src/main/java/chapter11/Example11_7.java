@@ -13,8 +13,8 @@ import reactor.core.scheduler.Schedulers;
 public class Example11_7 {
     public static void main(String[] args) throws InterruptedException {
         String key1 = "company";
-        Mono
-            .just("Steve")
+
+        Mono.just("Steve")
             .transformDeferredContextual((stringMono, ctx) ->
                     ctx.get("role"))
             .flatMap(name ->

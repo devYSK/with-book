@@ -8,6 +8,7 @@ import reactor.test.StepVerifier;
  * StepVerifier Context 테스트 예제
  */
 public class ExampleTest13_14 {
+
     @Test
     public void getSecretMessageTest() {
         Mono<String> source = Mono.just("hello");
@@ -29,4 +30,5 @@ public class ExampleTest13_14 {
                 .expectComplete()
                 .verify();
     }
+
 }

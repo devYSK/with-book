@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="chapter13.ExampleTest13_21" tests="1" skipped="0" failures="0" errors="0" timestamp="2024-06-03T15:54:44" hostname="MacBook-Pro-4.local" time="0.18">
+  <properties/>
+  <testcase name="publisherProbeTest()" classname="chapter13.ExampleTest13_21" time="0.18"/>
+  <system-out><![CDATA[00:54:44.565 [Test worker] DEBUG- Using Slf4j logging framework
+]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

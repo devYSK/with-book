@@ -15,10 +15,8 @@ import reactor.core.scheduler.Schedulers;
 @Slf4j
 public class Example11_1 {
     public static void main(String[] args) throws InterruptedException {
-        Mono
-            .deferContextual(ctx ->
-                Mono
-                    .just("Hello" + " " + ctx.get("firstName"))
+        Mono.deferContextual(ctx ->
+                Mono.just("Hello" + " " + ctx.get("firstName"))
                     .doOnNext(data -> log.info("# just doOnNext : {}", data))
             )
             .subscribeOn(Schedulers.boundedElastic())

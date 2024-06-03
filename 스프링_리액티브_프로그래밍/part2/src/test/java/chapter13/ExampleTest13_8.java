@@ -15,7 +15,7 @@ public class ExampleTest13_8 {
     public void getCOVID19CountTest() {
         StepVerifier
                 .create(TimeBasedTestExample.getCOVID19Count(
-                                Flux.interval(Duration.ofMinutes(1)).take(1)
+                                Flux.interval(Duration.ofSeconds(1)).take(1)
                         )
                 )
                 .expectSubscription()
