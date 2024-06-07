@@ -1,0 +1,5 @@
+
+a	java:S101"MRename this class name to match the regular expression '^[A-Z][a-zA-Z0-9]*$'.(†²§e
+o	java:S120"ZRename this package name to match the regular expression '^[a-z_]+(\.[a-z_][a-z0-9_]*)*$'.(‡ïÂø
+g
+java:S1612"LReplace this lambda with method reference 'Example14_41::transformToLetter'.(£¯…ùÿÿÿÿ

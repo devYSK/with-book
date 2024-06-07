@@ -1,5 +1,6 @@
 package chapter14.operator_7_split;
 
+import chapter14.Book;
 import chapter14.SampleData;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
@@ -15,8 +16,7 @@ import reactor.core.publisher.Flux;
 public class Example14_58 {
     public static void main(String[] args) {
         Flux.fromIterable(SampleData.books)
-                .groupBy(book ->
-                        book.getAuthorName(),
+                .groupBy(Book::getAuthorName,
                         book -> book.getBookName() + "(" + book.getAuthorName() + ")")
                 .flatMap(groupedFlux -> groupedFlux.collectList())
                 .subscribe(bookByAuthor ->

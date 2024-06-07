@@ -12,8 +12,7 @@ import reactor.core.publisher.Mono;
 @Slf4j
 public class Example14_43 {
     public static void main(String[] args) {
-        Flux
-            .range(1, 5)
+        Flux.range(1, 5)
             .flatMap(num -> {
                 if ((num * 2) % 3 == 0) {
                     return Flux.error(

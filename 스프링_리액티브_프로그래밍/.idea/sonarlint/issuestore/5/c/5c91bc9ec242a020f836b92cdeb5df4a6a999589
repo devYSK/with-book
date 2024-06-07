@@ -1,0 +1,7 @@
+
+b	java:S101"MRename this class name to match the regular expression '^[A-Z][a-zA-Z0-9]*$'.(ŒœÅü
+o	java:S120"ZRename this package name to match the regular expression '^[a-z_]+(\.[a-z_][a-z0-9_]*)*$'.(àåë
+B
+java:S1602",Remove useless curly braces around statement(…»ÏÄ
+M
+java:S1612"7Replace this lambda with method reference 'sink::next'.(…»ÏÄ

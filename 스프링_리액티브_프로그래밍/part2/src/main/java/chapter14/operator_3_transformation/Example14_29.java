@@ -9,8 +9,7 @@ import reactor.core.publisher.Flux;
 @Slf4j
 public class Example14_29 {
     public static void main(String[] args) {
-        Flux
-            .just("Good", "Bad")
+        Flux.just("Good", "Bad")
             .flatMap(feeling -> Flux
                                     .just("Morning", "Afternoon", "Evening")
                                     .map(time -> feeling + " " + time))

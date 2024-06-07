@@ -37,10 +37,8 @@ public class Example14_52 {
         HttpHeaders headers = new HttpHeaders();
         headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
 
-
         Mono.defer(() -> Mono.just(
-                            restTemplate
-                                    .exchange(worldTimeUri,
+                            restTemplate.exchange(worldTimeUri,
                                             HttpMethod.GET,
                                             new HttpEntity<String>(headers),
                                             String.class)

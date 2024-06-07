@@ -14,7 +14,7 @@ import reactor.core.publisher.Flux;
 @Slf4j
 public class Example14_45 {
     public static void main(String[] args) {
-        getBooks()
+        Flux.fromIterable(SampleData.books)
                 .map(book -> book.getPenName().toUpperCase())
                 .onErrorReturn("No pen name")
                 .subscribe(log::info);

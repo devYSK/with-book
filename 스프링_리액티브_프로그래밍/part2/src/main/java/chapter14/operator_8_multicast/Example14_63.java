@@ -21,8 +21,8 @@ public class Example14_63 {
                 Flux
                     .interval(Duration.ofMillis(500))
 
-                    .publish().autoConnect(1);
-//                    .publish().refCount(1);
+                    // .publish().autoConnect(1);
+                   .publish().refCount(1);
         Disposable disposable =
                 publisher.subscribe(data -> log.info("# subscriber 1: {}", data));
 

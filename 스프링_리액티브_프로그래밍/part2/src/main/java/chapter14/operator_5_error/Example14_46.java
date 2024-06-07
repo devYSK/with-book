@@ -16,7 +16,7 @@ import java.util.IllegalFormatException;
 @Slf4j
 public class Example14_46 {
     public static void main(String[] args) {
-        getBooks()
+        Flux.fromIterable(SampleData.books)
                 .map(book -> book.getPenName().toUpperCase())
                 .onErrorReturn(NullPointerException.class, "no pen name")
                 .onErrorReturn(IllegalFormatException.class, "Illegal pen name")

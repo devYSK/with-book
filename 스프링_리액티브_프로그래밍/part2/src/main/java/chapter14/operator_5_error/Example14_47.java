@@ -46,4 +46,5 @@ public class Example14_47 {
             super(message);
         }
     }
+
 }
