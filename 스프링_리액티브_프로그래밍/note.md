@@ -3824,9 +3824,1384 @@ refCount는 파라미터로 입력된 숫자만큼의 구독이 발생하는 시
 
 # Chapter 15 Spring WebFlux 개요
 
+SpringWebflux는 기존 Spring MVC 서블릿 기반의 blocking I/O (Thread per request) 방식의 처리량보다 높이기 위해 
+
+적은수의 스레드로 대량의 요청을 처리할 수 있게 만든 비동기 nonblocking 방식의 라이브러리이다.
+
+## Spring WebFlux의 기술 스택
+
+![image-20240607171721160](./images//image-20240607171721160.png)
+
+* webflux는 nettry 또는 jetty, undertow같은 서버에서 지원하는 리액티브 스트림즈로 동작한다
+* Spring Webflux는 WebFilter를 통해 Security를 지원한다
+* Spring Webflux는 R2dbc와 nonblocking nosql 모듈을 사용한다 
+
+
+
+## Spring Webflux의 요청 처리 흐름
+
+![image-20240607171835887](./images//image-20240607171835887.png)
+
+1. 요청이 들어오면 netty 등의 엔진을 거쳐 HttpHandler가 요청을 전달받는다. HttpHandler는 netty이외에도 다양한 서버 엔진을 사용할 수 있도록 서버 API를 추상화해주는 역할을 한다. 각 서버 엔진마다 ServerHttpRequest, ServerHttpResponse를 포함하는 ServerWebExchange를 생성한 후 WebFilter 체인으로 전달한다.
+   * ServerHttpRequest : 클라이언트로부터의 HTTP 요청을 나타내며, 요청 메서드, URL, 헤더, 바디 등과 같은 요청 정보를 제
+   * ServerHttpResponse : 서버에서 클라이언트로 보내는 HTTP 응답을 나타내며, 응답 상태, 헤더, 바디 등을 설정
+   * ServerWebExchange : 요청과 응답을 모두 포함하는 객체로, 필터 및 핸들러에서 공통적으로 사용하는 컨테이너 역할
+2. ServerWebExchange는 WebFilter에서 전처리 과정을 거친 후 WebHandler 인터페이스의 구현체인 DispatcherHandler에게 전달된다.
+   * WebFilter : 요청을 처리하기 전에 전처리하거나 응답을 후처리하는 컴포넌트. 체인 형태로 여러 필터를 연결할 수 있다.
+
+3. Spring MVC의 DispatcherServet과 유사한 역할을 하는 DispatcherHandler에서는 HandlerMapping List를 원본 Flux의 소스로 전달받는다 
+   * DispatcherHandler : Spring WebFlux의 중앙 요청 처리 컴포넌트로, 요청을 적절한 핸들러로 라우팅하고 처리 결과를 응답으로 반환
+   * **주요 기능**:
+     - HandlerMapping을 사용하여 요청에 적합한 핸들러 찾기.
+     - HandlerAdapter를 통해 핸들러 호출.
+     - HandlerResultHandler를 통해 처리 결과를 응답으로 변환.
+4. ﻿﻿﻿Server WebExchange를 처리할 핸들러를 조회한다.
+5. ﻿﻿﻿조회한 핸들러의 호출을 HandlerAdapter에게 위임한다.
+   * HandlerAdapter : 다양한 타입의 핸들러를 통합적으로 호출할 수 있게 하는 어댑터
+6. ﻿﻿﻿HandlerAdapter는 Server WebExchange를 처리할 핸들러를 호출한다.
+7. ﻿﻿﻿Controller 또는 HandlerFunction 형태의 핸들러에서 요청을 처리한 후, 응답 데이터를 리턴한다
+8. ﻿﻿﻿핸들러로부터 리턴받은 응답 데이터를 처리할 HandlerResulthandler를 조회한다.
+   * HandlerResultHandler : 핸들러의 처리 결과를 클라이언트에 대한 HTTP 응답으로 변환하는 역할
+9. ﻿﻿﻿조회한 HandlerResultHandler가 응답 데이터를 적절하게 처리한 후, response로 리턴한다.
+
+## WebFlux의 핵심 컴포넌트
+
+### HttpHandler
+
+HttpHandler는 다른 유형의 HTTP 서버 APT로 request와 response를 처리하기 위해 추상화된 단 하나의 메서드만 가진다
+
+```java
+public interface HttpHandler {
+
+	Mono<Void> handle(ServerHttpRequest request, ServerHttpResponse response);
+
+}
+```
+
+HttpHandler의 구현체인 HttpWebHandlerAdatper는, handle() 메서드의 파라미터로 전달받은
+
+ServerlIttpRequest와 ServerHItpResponse로 ServerWebExchange를 생성한 후에 WebHandler를 호출하는 역할을 한다. 
+
+###  WebFilter
+
+WebFilter는 Spring MVC의 서블릿 필터ServetFlier 처럼 핸들러가 요청을 처리하기 전에 전처리 작업을 할 수 있도록 해 준다 
+
+WebFilter는 주로 보안이나 세션 타임아웃 처리 등 애플리케이션에서 공통으로 필요한 전처리에 사용된다.
+
+```java
+public interface WebFilter {
+
+	Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain);
+
+}
+```
+
+필터체인을 형성하여 원하는 만큼 필터를 추가할 수 있다.
+
+```java
+@Component
+public class BookLogFilter implements WebFilter {
+    @Override
+    public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
+        String path = exchange.getRequest().getURI().getPath();
+ 
+        return chain.filter(exchange).doAfterTerminate(() -> {
+            if (path.contains("books")) {
+                System.out.println("path: " + path + ", status: " +
+                        exchange.getResponse().getStatusCode());
+            }
+        });
+    }
+}
+```
+
+
+
+
+
+인터셉터는 없나? -> 핸들러 인터셉터는 동기방식이다. 
+
+ WebFlux는 비동기 논블로킹 구조를 가지므로 전통적인 서블릿 기반의 `HandlerInterceptor` 대신 WebFilter를 사용하여 처리한다.
+
+### HandlerFilterFunction
+
+HandlerFilterFuncion은 함수형 기반의 요청 핸들러에 적용할 수 있는 Filter이다.
+
+라우터 기능과 결합하여 특정 경로에 대한 필터를 적용할 수 있다.
+
+```java
+@FunctionalInterface
+public interface HandlerFilterFunction<T extends ServerResponse, R extends ServerResponse> {
+	Mono<R> filter(ServerRequest request, HandlerFunction<T> next);
+}
+```
+
+```java
+public class BookRouterFunctionFilter implements HandlerFilterFunction {
+    @Override
+    public Mono<ServerResponse> filter(ServerRequest request, HandlerFunction next) {
+        String path = request.requestPath().value();
+
+        return next.handle(request).doAfterTerminate(() -> {
+            System.out.println("path: " + path + ", status: " +
+                    request.exchange().getResponse().getStatusCode());
+        });
+    }
+}
+
+```
+
+
+
+WebFilter의 구현체는 Spring Bean으로 등록되는 반면, 
+
+HandlerFilterFunction 구현체는 애너테이션 기반의 핸들러가 아닌 함수형 기반의 요청 핸들러에서 함수 형태로 사용되기 때문에 Spring Bean으로 등록되지 않는다.
+
+적용 예
+
+```java
+@Configuration
+public class BookRouterFunction {
+    @Bean
+    public RouterFunction routerFunction() {
+        return RouterFunctions
+                .route(GET("/v1/router/books/{book-id}"),
+                        (ServerRequest request) -> this.getBook(request))
+                .filter(new BookRouterFunctionFilter()); // 빈 말고 그냥 등록함 
+    }
+}
+```
+
+#### WebFilter와 HandlerFilterFunction의 차이점
+
+webFiter는 애플리케이션 내에 정의된 모든 핸들러에 공통으로 동작합니다. 따라서 애너 테이션 기반의 요청 핸들러와 함수형 기반의 요청 핸들러에서 모두 동작한다. 
+
+반면에 HandlerFilterFunction은 함수형 기반의 핸들러에서만 동작하기 때문에 함수형 기 반의 핸들러에서만 제한적으로 필터링 작업을 수행하고 싶다면 HandlerFiterFunction을 구현해서 사용하면 된다.
+
+### DispatcherHandler
+
+spring mvc의 dispatcherServlet과 비슷하게, 요청이 오면 다른 적절한 컴포넌트로 요청을 위임한다.
+
+### HandlerMapping
+
+Spring MVC와 마찬가지로 request와 handler에 대한 매핑을 정의하는 인터페이스이다.
+
+구현 클래스로는 RequestMappingH landlerMapping, RouterFunctionMapping 등이 있다. 
+
+* RequestMappingHandlerMapping는 어노테이션 기반 매핑
+* RouterFunctionMapping는 라우터 함수형 기반 매핑 
+
+### HandlerAdapter
+
+HandlerMapping을 통해 얻은 핸들러를 직접 호출하고 결과인 `Mono<HandlerResult>`를 받는다. 
+
+구현체로 RequestMappingHandlerAdapter, HandlerFunctionAdapter, Simple HandlerAdapter, WebSocketHandlerAdapter가 있다. 
+
+
+
+## Spring WebFlux의 Non-blocking 프로세스 구조
+
+적은수의 고정된 스레드 풀과 이벤트 루프를 이용해서 요청을 처리한다. 
+
+![image-20240607203047041](./images//image-20240607203047041.png)
+
+1. ﻿﻿﻿클라이언트로부터 들어오는 요청을 요청 핸들러가 전달받습니다.
+2. ﻿﻿﻿전달받은 요청을 이벤트 루프에 푸시합니다.
+3. ﻿﻿﻿이벤트 루프는 네트워크, 데이터베이스 연결 작업 등 비용이 드는 작업에 대한 콜백을 등록합니다.
+4. ﻿﻿﻿작업이 완료되면 완료 이벤트를 이벤트 루프에 푸시합니다.
+5. 등록한 콜백을 호출해 처리 결과를 전달합니다.
+
+이벤트 루프는 단일 스레드에서 실행되며, 요청, 네트워크 디비 I/O등 모든 작업이 이벤트로 처리되기 때문에 이벤트 발생 시 해당 이벤트에 대한 콜백을 등록함과 동시에 다음 이벤트 처리로 넘어간다 
+
+##  Spring Webflux의 스레드 모델
+
+일반적으로 이벤트 루프의 스레드는 갯수는 CPU 코어만큼의 스레드를 생성해서 대량의 요청을 처리한다.
+
+```java
+@FunctionalInterface
+public interface LoopResources extends Disposable {
+
+	/**
+	 * Default worker thread count, fallback to available processor
+	 * (but with a minimum value of 4).
+	 */
+	int DEFAULT_IO_WORKER_COUNT = Integer.parseInt(System.getProperty(
+			ReactorNetty.IO_WORKER_COUNT,
+			"" + Math.max(Runtime.getRuntime().availableProcessors(), 4)));
+
+```
+
+리액터 네티의 LoopResources 인터페이스 코드 일부다.
+
+CPU 코어 수가 4보다 적은경우 최소 4개의 워커 스레드를 생성하고, 4보다 많다면 코어 갯수만큼 스레드를 생성한다.
+
+그러나, CPU 바운드 작업이나 Blocking 되는 지점이 있다면 오히려 스레드가 블락되기때문에 블락되는만큼 요청을 처리할 수 없어 성능이 저하될 수 있다.
+
 # Chapter 16 애너테이션 기반 컨트롤러
+
+Spring MVC와 같이 어노테이션 기반으로 요청을 핸들링한다.
+
+```java
+@RestController
+@RequestMapping("/v1/books")
+public class BookController {
+    private final BookService bookService;
+    private final BookMapper mapper;
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public Mono postBook(@RequestBody BookDto.Post requestBody) {
+        Mono<Book> book =
+                bookService.createBook(mapper.bookPostToBook(requestBody));
+
+        Mono<BookDto.Response> response = mapper.bookToBookResponse(book);
+        return response;
+    }
+  
+     @PatchMapping("/{book-id}")
+    public Mono patchBook(@PathVariable("book-id") long bookId,
+                                    @RequestBody BookDto.Patch requestBody) {
+        requestBody.setBookId(bookId);
+        Mono<Book> book =
+                bookService.updateBook(mapper.bookPatchToBook(requestBody));
+
+        return mapper.bookToBookResponse(book);
+    }
+
+    @GetMapping("/{book-id}")
+    public Mono getBook(@PathVariable("book-id") long bookId) {
+        Mono<Book> book = bookService.findBook(bookId);
+
+        return mapper.bookToBookResponse(book);
+    }
+}
+```
+
+그러나 여기에 Blocking 요소가 있다 무엇일까 ?
+
+```java
+@RestController("bookControllerV2")
+@RequestMapping("/v2/books")
+public class BookController {
+    private final BookService bookService;
+    private final BookMapper mapper;
+
+    public BookController(BookService bookService, BookMapper mapper) {
+        this.bookService = bookService;
+        this.mapper = mapper;
+    }
+
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    public Mono postBook(@RequestBody Mono<BookDto.Post> requestBody) {
+        Mono<Book> result = bookService.createBook(requestBody);
+
+        return result.flatMap(book -> Mono.just(mapper.bookToResponse(book)));
+    }
+
+    @PatchMapping("/{book-id}")
+    public Mono patchBook(@PathVariable("book-id") long bookId,
+                                    @RequestBody Mono<BookDto.Patch> requestBody) {
+        Mono<Book> result = bookService.updateBook(bookId, requestBody);
+        return result.flatMap(book -> Mono.just(mapper.bookToResponse(book)));
+    }
+
+    @GetMapping("/{book-id}")
+    public Mono getBook(@PathVariable("book-id") long bookId) {
+        return bookService.findBook(bookId)
+                .flatMap(book -> Mono.just(mapper.bookToResponse(book)));
+    }
+}
+```
+
+1. method argument로 리액티브 타입을 지원한다.
+2. getBook에서 findBook으로부터 받은 Mono를 mapper를 이용해 중간에 block하지말고, flatMap으로 변환해서 전달한다.
+
+#### Mono로 받지 않는 경우
+
+- **블로킹 가능성**: 요청 본문을 동기적으로 처리하므로, 큰 요청 본문을 처리할 때 스레드가 블로킹될 수 있다.
+- **성능 저하**: 동기적으로 처리하는 동안 다른 요청을 처리하는 데 필요한 리소스가 부족해질 수 있어 전체적인 성능이 저하될 가능성이 있다.
+- **리액티브 파이프라인 단절**: 리액티브 처리 파이프라인이 중간에 동기적으로 변환되므로, 비동기 처리의 이점을 상실할 수 있다.
+
 # Chapter 17 함수형 엔드포인트(Functional Endpoint)
+
+## HandlerFunction을 사용한 Request 처리
+
+Spring WelFlux의 함수형 엔드포인트는 들어오는 요청을 처리하기 위해
+
+HandlerFunction이라는 함수형 기반의 핸들러를 사용한다.
+
+```java
+@FunctionalInterface
+public interface HandlerFunction<T extends ServerResponse> {
+
+  Mono<T> handle(ServerRequest request);
+
+}
+```
+
+* 요청 처리에 대한 응답은 Mono <ServerResponse)의 형태로 리턴된다
+* HandlerFunction은 RouterFunction을 통해 요청이 라우팅된 이후에 동작한다 
+
+## Request 라우팅을 위한 RouterFunction
+
+RouterFunction은 @RequestMapping 어노테이션과 동일한 기능을 한다.
+
+기존 Controller를 RouterFunction으로 변환해보자
+
+```java
+@Configuration("bookRouterV1")
+public class BookRouter {
+    @Bean
+    public RouterFunction<?> routeBookV1(BookHandler handler) {
+        return route()
+                .POST("/v1/books", handler::createBook)
+                .PATCH("/v1/books/{book-id}", handler::updateBook)
+                .GET("/v1/books", handler::getBooks)
+                .GET("/v1/books/{book-id}", handler::getBook)
+                .build();
+    }
+}
+
+```
+
+* route() 메서드는 RouterFunctionBuilder 객체를 리턴하며 해당 객체로 각각 HTTP 메소드에 매치되는 request를 처리하기 위한 라우트를 추가한다
+
+또한 request를 처리하기 위한 핸들러를 구현한다
+
+```java
+
+@Component("bookHandlerV1")
+public class BookHandler {
+    private final BookMapper mapper;
+
+    public BookHandler(BookMapper mapper) {
+        this.mapper = mapper;
+    }
+
+    public Mono<ServerResponse> createBook(ServerRequest request) {
+        return request.bodyToMono(BookDto.Post.class)
+                .map(post -> mapper.bookPostToBook(post))
+                .flatMap(book ->
+                        ServerResponse
+                                .created(URI.create("/v1/books/" + book.getBookId()))
+                                .build());
+    }
+
+    public Mono<ServerResponse> getBook(ServerRequest request) {
+        long bookId = Long.valueOf(request.pathVariable("book-id"));
+        Book book =
+                new Book(bookId,
+                        "Java 고급",
+                        "Advanced Java",
+                        "Kevin",
+                        "111-11-1111-111-1",
+                        "Java 중급 프로그래밍 마스터",
+                        "2022-03-22",
+                        LocalDateTime.now(),
+                        LocalDateTime.now());
+        return ServerResponse
+                            .ok()
+                            .bodyValue(mapper.bookToResponse(book))
+                            .switchIfEmpty(ServerResponse.notFound().build());
+    }
+
+    public Mono<ServerResponse> updateBook(ServerRequest request) {
+        final long bookId = Long.valueOf(request.pathVariable("book-id"));
+        return request
+                .bodyToMono(BookDto.Patch.class)
+                .map(patch -> {
+                    patch.setBookId(bookId);
+                    return mapper.bookPatchToBook(patch);
+                })
+                .flatMap(book -> ServerResponse.ok()
+                        .bodyValue(mapper.bookToResponse(book)));
+    }
+
+    public Mono<ServerResponse> getBooks(ServerRequest request) {
+        List<Book> books = List.of(
+                new Book(1L,
+                        "Java 고급",
+                        "Advanced Java",
+                        "Kevin",
+                        "111-11-1111-111-1",
+                        "Java 중급 프로그래밍 마스터",
+                        "2022-03-22",
+                        LocalDateTime.now(),
+                        LocalDateTime.now()),
+                new Book(2L,
+                        "Kotlin 고급",
+                        "Advanced Kotlin",
+                        "Kevin",
+                        "222-22-2222-222-2",
+                        "Kotlin 중급 프로그래밍 마스터",
+                        "2022-05-22",
+                        LocalDateTime.now(),
+                        LocalDateTime.now())
+        );
+        return ServerResponse
+                .ok()
+                .bodyValue(mapper.booksToResponse(books));
+    }
+}
+
+```
+
+* NotFound를 반환하려면 ServerResponse.notfound().build() 반환
+* ok는 ServerResponse.ok()
+
+
+
+## 함수형 엔드포인트에서 request Body 유효성 검증
+
+### Custom Validator
+
+Custom Validator를 지원한다
+
+```java
+import org.springframework.stereotype.Component;
+import org.springframework.validation.Errors;
+import org.springframework.validation.ValidationUtils;
+import org.springframework.validation.Validator;
+
+@Component("bookValidatorV2")
+public class BookValidator implements Validator {
+    @Override
+    public boolean supports(Class<?> clazz) {
+        return BookDto.Post.class.isAssignableFrom(clazz);
+    }
+
+    @Override
+    public void validate(Object target, Errors errors) {
+        BookDto.Post post = (BookDto.Post) target;
+
+        ValidationUtils.rejectIfEmptyOrWhitespace(
+                errors, "titleKorean", "field.required");
+
+        ValidationUtils.rejectIfEmptyOrWhitespace(
+                errors, "titleEnglish", "field.required");
+    }
+}
+
+```
+
+* Jakarta Validator가 아니다.
+
+검증하려면 핸들러에서 호출한다
+
+```java
+
+@Slf4j
+@Component("bookHandlerV2")
+public class BookHandler {
+    private final BookMapper mapper;
+    private final BookValidator validator;
+
+    public BookHandler(BookMapper mapper, BookValidator validator) {
+        this.mapper = mapper;
+        this.validator = validator;
+    }
+
+    public Mono<ServerResponse> createBook(ServerRequest request) {
+        return request.bodyToMono(BookDto.Post.class)
+                .doOnNext(post -> this.validate(post)) // here 호출한다. 
+                .map(post -> mapper.bookPostToBook(post))
+                .flatMap(book ->
+                        ServerResponse
+                                .created(URI.create("/v2/books/" + book.getBookId()))
+                                .build());
+    }
+
+    private void validate(BookDto.Post post) {
+        Errors errors = new BeanPropertyBindingResult(post, BookDto.class.getName());
+        validator.validate(post, errors);
+        if (errors.hasErrors()) {
+            log.error(errors.getAllErrors().toString());
+            throw new ServerWebInputException(errors.toString());
+        }
+    }
+}
+
+```
+
+
+
+## BeanValidation을 이용한 유효성 검증
+
+전처럼 커스텀을 사용하는 경우는 많지 않을 수 있따. 일단 유효성 검증을 위한 코드가 섞여 코드가 복잡해진다.
+
+Webflux에서도 Bean VAlidation을 지원한다.
+
+Spring WebFlux에서는
+
+ Spring에서 지원하는 Validator 인터페이스와 
+
+javax에 서 지원하는 표준 Validator 인터페이스 중 하나를 사용해 Validator 구현체를 주입받아서 유효성 검증을 진행할 수 있다.
+
+1. Spring Validator 인터페이스 사용
+
+```java
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Component;
+import org.springframework.validation.BeanPropertyBindingResult;
+import org.springframework.validation.Errors;
+import org.springframework.validation.Validator;
+import org.springframework.web.server.ResponseStatusException;
+
+@Slf4j
+@Component("bookValidatorV3")
+public class BookValidator<T> {
+    private final Validator validator;
+
+    public BookValidator(@Qualifier("springValidator") Validator validator) {
+        this.validator = validator;
+    }
+
+    public void validate(T body) {
+        Errors errors =
+                new BeanPropertyBindingResult(body, body.getClass().getName());
+
+        this.validator.validate(body, errors);
+
+        if (!errors.getAllErrors().isEmpty()) {
+            onValidationErrors(errors);
+        }
+    }
+
+    private void onValidationErrors(Errors errors) {
+        log.error(errors.getAllErrors().toString());
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, errors.getAllErrors()
+                .toString());
+    }
+}
+
+```
+
+
+
+2. javax(jakarta) Validator 인터페이스 사용
+
+```java
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.http.HttpStatus;
+import org.springframework.stereotype.Component;
+import org.springframework.web.server.ResponseStatusException;
+
+import javax.validation.ConstraintViolation;
+import javax.validation.Validator;
+import java.util.Set;
+
+
+@Slf4j
+@Component("bookValidatorV4")
+public class BookValidator<T> {
+    private final Validator validator;
+
+    public BookValidator(@Qualifier("javaxValidator") Validator validator) {
+        this.validator = validator;
+    }
+
+    public void validate(T body) {
+        Set<ConstraintViolation<T>> constraintViolations = validator.validate(body);
+        if (!constraintViolations.isEmpty()) {
+            onValidationErrors(constraintViolations);
+        }
+    }
+
+    private void onValidationErrors(Set<ConstraintViolation<T>> constraintViolations) {
+        log.error(constraintViolations.toString());
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                                            constraintViolations.toString());
+    }
+}
+
+```
+
+마찬가지로 호출해서 사용하면 된다
+
+```java
+@Slf4j
+@Component("bookHandlerV4")
+public class BookHandler {
+    private final BookMapper mapper;
+    private final BookValidator validator;
+
+    public BookHandler(BookMapper mapper, BookValidator validator) {
+        this.mapper = mapper;
+        this.validator = validator;
+    }
+
+    public Mono<ServerResponse> createBook(ServerRequest request) {
+        return request.bodyToMono(BookDto.Post.class)
+                .doOnNext(post -> validator.validate(post))
+                .map(post -> mapper.bookPostToBook(post))
+                .flatMap(book -> ServerResponse
+                        .created(URI.create("/v4/books/" + book.getBookId()))
+                        .build());
+
+    }
+}
+```
+
+
+
 # Chapter 18 Spring Data R2DBC
+
+r2dbc는 RDB에  리액티브프로그래밍을 지원하는 Spec이면서 클라이언트가 사용하기 위한 SPI이다
+
+JDBC API 자체가 Blocking API이기 떄문에 완전한  Non Blocking을 지원하는것이 불가능했찌만 R2dbc로 인해 지원하게 되었다.
+
+## Spring Data R2DBC란
+
+Spring Data 프로젝트 일부로써, Spring처럼 추상화가 잘 되어있다.
+
+JPA같은 ORM 특징인 캐싱, 지연로딩 등 ORM은 지원하지 않지만, 단순하고 심플하게 사용할 수 있다.
+
+crudRepository등을 지원하기 때문에 보일러 플레이트 코드도 대량 줄일 수 있다 
+
+## Spring Data R2DBC 설정
+
+build.gradle 추가한다
+
+```java
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+    implementation 'org.springframework.boot:spring-boot-starter-data-r2dbc'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'io.projectreactor:reactor-test'
+    runtimeOnly 'io.r2dbc:r2dbc-h2'
+}
+
+```
+
+### 테이블 스키마 정의
+
+JPA처럼 엔티티에 정의된 매핑정보로 테이블을 자동 생성해주는 기능이 없다. 테이블 스크립트를 직접 작성해서 테이블을 생성해야 한다.
+
+src/main/resources/db/h2 에 schema.sql 파일을 생성하고, yml에 다음과 같이 설정한다
+
+```yaml
+spring:
+  sql:
+    init:
+      schema-locations: classpath*:db/h2/schema.sql
+      data-locations: classpath*:db/h2/data.sql
+logging:
+  level:
+    org:
+      springframework:
+        r2dbc: DEBUG
+```
+
+### R2DBCRepository와 Auditing 기능 활성화
+
+어노테이션을 이용해서 먼저 활성화 해야한다
+
+* EnableR2dbcRepositories, EnableR2dbcAuditing
+
+```java
+@EnableR2dbcRepositories
+@EnableR2dbcAuditing
+@SpringBootApplication
+public class Chapter18Application {
+
+    public static void main(String[] args) {
+        SpringApplication.run(Chapter18Application.class, args);
+    }
+
+}
+
+```
+
+* 이런 부분은, 테스트 용이성과 설정 관리 용이성으로 인해 사실은 Config 클래스를 따로 만들어주는것이 좋다.
+
+### 도메인 엔티티 클래스 매핑
+
+```java
+import org.springframework.data.annotation.CreatedDate;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.LastModifiedDate;
+import org.springframework.data.relational.core.mapping.Column;
+
+@Getter
+@AllArgsConstructor
+@NoArgsConstructor
+@Setter
+public class Book {
+    @Id
+    private long bookId;
+    private String titleKorean;
+    private String titleEnglish;
+    private String description;
+    private String author;
+    private String isbn;
+    private String publishDate;
+
+    @CreatedDate
+    private LocalDateTime createdAt;
+
+    @LastModifiedDate
+    @Column("last_modified_at")
+    private LocalDateTime modifiedAt;
+}
+
+```
+
+* 식별자를 위해 @Id 어노테이션을 추가 
+
+* @Table 어노테이션을 생략하면, 클래스 이름을 테이블 이름으로 사용한다
+* audit을 위해 @CreatedDate와 @LastModifedDate를 사용한다. 
+
+### R2DBC Repository를 이용한 액세스
+
+```java
+@Repository("bookRepositoryV5")
+public interface BookRepository extends ReactiveCrudRepository<Book, Long> {
+    Mono<Book> findByIsbn(String isbn);
+}
+```
+
+* 기본적으로 쿼리 메서드를 지원한다. 
+* 리턴타입은 리액티브 타입인  Mono, Flux다
+
+crud는 다음처럼 사용하면 된다
+
+```java
+@Service("bookServiceV5")
+@RequiredArgsConstructor
+public class BookService {
+    private final @NonNull BookRepository bookRepository;
+    private final @NonNull CustomBeanUtils<Book> beanUtils;
+
+    public Mono<Book> saveBook(Book book) {
+        return verifyExistIsbn(book.getIsbn())
+                .then(bookRepository.save(book));
+    }
+
+    public Mono<Book> updateBook(Book book) {
+        return findVerifiedBook(book.getBookId())
+                .map(findBook -> beanUtils.copyNonNullProperties(book, findBook))
+                .flatMap(updatingBook -> bookRepository.save(updatingBook));
+    }
+
+    public Mono<Book> findBook(long bookId) {
+        return findVerifiedBook(bookId);
+    }
+
+    public Mono<List<Book>> findBooks() {
+        return bookRepository.findAll().collectList();
+    }
+
+    private Mono<Void> verifyExistIsbn(String isbn) {
+        return bookRepository.findByIsbn(isbn)
+                .flatMap(findBook -> {
+                    if (findBook != null) {
+                        return Mono.error(new BusinessLogicException(
+                                                    ExceptionCode.BOOK_EXISTS));
+                    }
+                    return Mono.empty();
+                });
+    }
+
+    private Mono<Book> findVerifiedBook(long bookId) {
+        return bookRepository
+                .findById(bookId)
+                .switchIfEmpty(Mono.error(new BusinessLogicException(
+                                                    ExceptionCode.BOOK_NOT_FOUND)));
+    }
+    
+}
+```
+
+## R2dbcEntityTemplete 을 이용한 데이터 액세스
+
+R2DBCRepository외에도 접근할 수 있는 방법이 있다.
+
+템플릿/콜백 패턴이 적용된 JdbcTemplate처럼 R2dbcEntityTemplete을 사용할 수 있다.
+
+```java
+public class R2dbcEntityTemplate implements R2dbcEntityOperations, BeanFactoryAware, ApplicationContextAware {
+
+	private final DatabaseClient databaseClient;
+
+	private final ReactiveDataAccessStrategy dataAccessStrategy;
+
+	private final R2dbcConverter converter;
+
+	private final MappingContext<? extends RelationalPersistentEntity<?>, ? extends RelationalPersistentProperty> mappingContext;
+
+	private final SpelAwareProxyProjectionFactory projectionFactory;
+
+	private @Nullable ReactiveEntityCallbacks entityCallbacks;
+
+  ...
+}
+```
+
+```java
+@Slf4j
+@Service("bookServiceV6")
+@RequiredArgsConstructor
+public class BookService {
+    private final @NonNull R2dbcEntityTemplate template;
+    private final @NonNull CustomBeanUtils<Book> beanUtils;
+
+    public Mono<Book> saveBook(Book book) {
+        return verifyExistIsbn(book.getIsbn())
+                .then(template.insert(book));
+    }
+
+    public Mono<Book> updateBook(Book book) {
+        return findVerifiedBook(book.getBookId())
+                .map(findBook -> beanUtils.copyNonNullProperties(book, findBook))
+                .flatMap(updatingBook -> template.update(updatingBook));
+    }
+
+    public Mono<Book> findBook(long bookId) {
+        return findVerifiedBook(bookId);
+    }
+
+    public Mono<List<Book>> findBooks() {
+        return template.select(Book.class).all().collectList();
+    }
+
+ // ----------------------------
+    private Mono<Void> verifyExistIsbn(String isbn) {
+        return template.selectOne(query(where("ISBN").is(isbn)), Book.class)
+                .flatMap(findBook -> {
+                    if (findBook != null) {
+                        return Mono.error(new BusinessLogicException(
+                                ExceptionCode.BOOK_EXISTS));
+                    }
+                    return Mono.empty();
+                });
+    }
+
+    private Mono<Book> findVerifiedBook(long bookId) {
+        return template.selectOne(query(where("BOOK_ID").is(bookId))
+                                                                        , Book.class)
+                .switchIfEmpty(Mono.error(new BusinessLogicException(
+                                                ExceptionCode.BOOK_NOT_FOUND)));
+    }
+}
+```
+
+* selectOne 메소드는 1건의 데이터를 조회하는데 사용되며, Query 객체(Criteria 포함)와 엔티티 클래스의 Class 객체를 파라미터로 가진다. 
+  * where() 메서드는  WHERE절을 표현하는 Creteria 객체이다
+  * is() 메서드는 쿼리문에서 equal을 표현한다 
+* select(Book.class).all()은 모든 정보를 반환한다.
+
+### Terminating method
+
+select()와 함께 사용할 수 있는 메소드들이다.
+
+| 메서드   | 설명                                                         |
+| -------- | ------------------------------------------------------------ |
+| first()  | 조건에 일치하는 result row 중에서 첫 번째 row를 얻고자 할 경우 사용할 수 있습니다. 조건에 일치하는 row가 없다면 `Mono<Void>`를 리턴합니다. |
+| one()    | 조건에 일치하는 result row가 단 하나일 경우 사용할 수 있습니다. 조건에 일치하는 row가 없다면 `Mono<Void>`를 리턴하며, result row가 한 건보다 많을 경우 예외가 발생합니다. |
+| all()    | 조건에 일치하는 모든 result row를 얻고자 할 경우 사용할 수 있습니다. |
+| count()  | 조건에 일치하는 데이터의 건수만 조회할 경우 사용할 수 있습니다. 리턴 타입은 `Mono<Long>`입니다. |
+| exists() | 조건에 일치하는 result row가 존재하는지 여부를 확인하고자 할 경우 사용할 수 있습니다. 리턴 타입은 `Mono<Boolean>`입니다. |
+
+### Creteria method
+
+SQL 연산자에 해당하는 다양한 Creteria method를 지원한다
+
+| 메서드                                                  | 설명                                                         |
+| ------------------------------------------------------- | ------------------------------------------------------------ |
+| and(String column)                                      | SQL 쿼리문에서 'AND' 연산자에 해당하며, 파라미터로 주어지는 컬럼명에 해당하는 Criteria를 추가한 새로운 Criteria를 리턴합니다. |
+| or(String column)                                       | SQL 쿼리문에서 'OR' 연산자에 해당하며, 파라미터로 주어지는 컬럼명에 해당하는 Criteria를 추가한 새로운 Criteria를 리턴합니다. |
+| greaterThan(Object o)                                   | SQL 쿼리문에서 '>' 연산자에 해당하며, 'greater-than' Criteria를 추가한 새로운 Criteria를 리턴합니다. |
+| greaterThanOrEquals(Object o)                           | SQL 쿼리문에서 '>=' 연산자에 해당하며, 'greater-than or equal to' Criteria를 추가한 새로운 Criteria를 리턴합니다. |
+| in(Object... o) 또는 in(Collection<?> collection)       | SQL 쿼리문에서 'IN' 연산자에 해당하는 Criteria를 추가한 새로운 Criteria를 리턴합니다. |
+| is(Object o)                                            | SQL 쿼리문에서 '=' 연산자에 해당하는 Criteria를 추가한 새로운 Criteria를 리턴합니다. |
+| isNull()                                                | SQL 쿼리문에서 'IS NULL' 연산자에 해당하는 Criteria를 추가한 새로운 Criteria를 리턴합니다. |
+| isNotNull()                                             | SQL 쿼리문에서 'IS NOT NULL' 연산자에 해당하는 Criteria를 추가한 새로운 Criteria를 리턴합니다. |
+| lessThan(Object o)                                      | SQL 쿼리문에서 '<' 연산자에 해당하며, 'less-than' Criteria를 추가한 새로운 Criteria를 리턴합니다. |
+| lessThanOrEquals(Object o)                              | SQL 쿼리문에서 '<=' 연산자에 해당하며, 'less-than or equal to' Criteria를 추가한 새로운 Criteria를 리턴합니다. |
+| like(Object o)                                          | SQL 쿼리문에서 'LIKE' 연산자에 해당하는 Criteria를 추가한 새로운 Criteria를 리턴합니다. |
+| not(Object o)                                           | SQL 쿼리문에서 'NOT' 연산자에 해당하는 Criteria를 추가한 새로운 Criteria를 리턴합니다. |
+| notIn(Object... o) 또는 notIn(Collection<?> collection) | SQL 쿼리문에서 'NOT IN' 연산자에 해당하는 Criteria를 추가한 새로운 Criteria를 리턴합니다. |
+
+## Spring Data R2DBC의 페이지네이션 처리
+
+### Repository의 페이지네이션
+
+JPA 등에서 사용하던 Pageable 객체를 그대로 사용한다
+
+```java
+@Repository("bookRepositoryV7")
+public interface BookRepository extends ReactiveCrudRepository<Book, Long> {
+    Mono<Book> findByIsbn(String isbn);
+    Flux<Book> findAllBy(Pageable pageable);
+}
+```
+
+```java
+public Mono<List<Book>> findBooks(@Positive int page,
+                                  @Positive int size) {
+    return bookRepository
+            .findAllBy(PageRequest.of(page - 1, size,
+                                                Sort.by("memberId").descending()))
+            .collectList();
+}
+```
+
+page나 slice를 구현하고 싶으면 다음처럼 오퍼레이터를 이용한다
+
+```java
+@Service
+public class BookService {
+    private final BookRepository bookRepository;
+
+    public Mono<Page<Book>> findBooks(int page, int size) {
+        Pageable pageable = PageRequest.of(page - 1, size, Sort.by("memberId").descending());
+
+        return bookRepository.findAllBy(pageable)
+                .collectList()
+                .zipWith(bookRepository.count())
+                .map(tuple -> new PageImpl<>(tuple.getT1(), pageable, tuple.getT2()));
+    }
+
+  public Mono<Slice<Book>> findBooks(int page, int size) {
+    Pageable pageable = PageRequest.of(page - 1, size, Sort.by("memberId").descending());
+
+    return bookRepository.findAllBy(pageable)
+            .collectList()
+            .map(list -> new SliceImpl<>(list, pageable, list.size() == size));
+	}
+  
+}
+```
+
+### R2dbcEntityTemplete에서의 페이지네이션 처리
+
+RadbcEntityTemplate은 limit(), offset(), sort() 등의 쿼리 빌드 메서드를 조 합하면 페이지네이션 처리를 간단히 적용할 수 있다.
+
+```java
+@Slf4j
+@Validated
+@Service("bookServiceV8")
+@RequiredArgsConstructor
+public class BookService {
+    private final @NonNull R2dbcEntityTemplate template;
+    private final @NonNull CustomBeanUtils<Book> beanUtils;
+
+    public Mono<List<Book>> findBooks(@Positive long page, @Positive long size) {
+
+        return template
+                .select(Book.class)
+                .count()
+                .flatMap(total -> {
+                    Tuple2<Long, Long> skipAndTake = getSkipAndTake(total, page, size);
+                    return template
+                            .select(Book.class)
+                            .all()
+                            .skip(skipAndTake.getT1())
+                            .take(skipAndTake.getT2())
+                            .collectSortedList((Book b1, Book b2) ->
+                                    (int) (b2.getBookId() - b1.getBookId()));
+                });
+    }
+
+
+    private Tuple2<Long, Long> getSkipAndTake(long total, long movePage, long size) {
+        long totalPages = (long) Math.ceil((double) total / size);
+        long page = movePage > totalPages ? totalPages : movePage;
+        long skip = total - (page * size) < 0 ? 0 : total - (page * size);
+        long take = total - (page * size) < 0 ? total - ((page - 1) * size) : size;
+
+        return Tuples.of(skip, take);
+    }
+}
+
+```
+
+* count() Operator로 저장된 도서의 총 개수를 구한 뒤에, flatMap() Operator 내부에서 페이지네이션 처리를 수행
+
+* skip() Operator는 findBooks()의 파라미터로 전달받은 페이지의 시작 지점 으로 이동하기 위해 페이지 수만큼 emit된 데이터를 건너뛰는 역할을 수행
+
+* take() Operator는 findBooks()의 파라미터로 전달받은 페이지의 데이터 개수(size)만큼 데이터를 가져오는 역할을 수행
+
+* getSkipAndTakeltotal, page, Size) 메서드는 데이터의 총 개수로 전체 페이지 수 를 구하고, 이동할 페이지의 데이터 시작 지점 전까지 건너뛸 데이터 개수와 가 져올 데이터 개수를 계산한다.
+
+> 너무 복잡하다.. 
+
+아래처럼 더 간단하게 할 수도 있다.
+
+```java
+@Slf4j
+@Validated
+@Service("bookServiceV8")
+@RequiredArgsConstructor
+public class BookService {
+    private final @NonNull R2dbcEntityTemplate template;
+
+    public Mono<Page<Book>> findBooks(@Positive int page, @Positive int size) {
+        Pageable pageable = PageRequest.of(page - 1, size);
+
+        return template.select(Book.class)
+                .matching(Query.empty().with(pageable))
+                .all()
+                .collectList()
+                .zipWith(template.select(Book.class).matching(Query.empty()).count())
+                .map(tuple -> new PageImpl<>(tuple.getT1(), pageable, tuple.getT2()));
+    }
+}
+```
+
+
+
 # Chapter 19 예외 처리
+
+Spring MVC 기반의 애플리케이션에서 @ExceptionHandler나 @ControllerAdvice 등의 애너테이션을 이용하는 예외 처리 방식은 Spring WebFlux 기반 애플리케이션에서도 사용할 수 있는 방식이다.
+
+
+
+## onErrorResume() 오퍼레이터를 통한 예외처리
+
+```java
+public Mono<ServerResponse> createBook(ServerRequest request) {
+        return request.bodyToMono(BookDto.Post.class)
+                .doOnNext(post -> validator.validate(post))
+                .flatMap(post -> bookService.createBook(mapper.bookPostToBook(post)))
+                .flatMap(book -> ServerResponse
+                        .created(URI.create("/v9/books/" + book.getBookId()))
+                        .build())
+                .onErrorResume(BusinessLogicException.class, error -> ServerResponse
+                            .badRequest()
+                            .bodyValue(new ErrorResponse(HttpStatus.BAD_REQUEST,
+                                                            error.getMessage())))
+                .onErrorResume(Exception.class, error ->
+                        ServerResponse
+                                .unprocessableEntity()
+                                .bodyValue(
+                                    new ErrorResponse(HttpStatus.INTERNAL_SERVER_ERROR,
+                                                        error.getMessage())));
+}
+```
+
+* 에러발생시 에러시그널을 받아 처리하는 방식이다
+* 그런데 매번 이렇게 알수없는 예외들을 보낸다는것은 매우 비효율적으로 보인다
+
+## ErrorWebExceptionHandler를 이용한 글로벌 예외처리
+
+클래스 내에 여러 개의 sequence가 존재 한다면 각 Sequence마다 onErrorResume() Operator를 일일이 추가해야 되 고 중복 코드가 발생할 수 있는 단점이 존재한다.
+
+이런 단점을 보완할 수 있는 exceptionHandler가 존재한다.
+
+```java
+import org.springframework.boot.web.reactive.error.ErrorWebExceptionHandler;
+
+@Order(-2)
+@Configuration
+public class GlobalWebExceptionHandler implements ErrorWebExceptionHandler {
+    private final ObjectMapper objectMapper;
+
+    public GlobalWebExceptionHandler(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
+
+    @Override
+    public Mono<Void> handle(ServerWebExchange serverWebExchange,
+                             Throwable throwable) {
+        return handleException(serverWebExchange, throwable);
+    }
+
+    private Mono<Void> handleException(ServerWebExchange serverWebExchange,
+                                       Throwable throwable) {
+        ErrorResponse errorResponse = null;
+        DataBuffer dataBuffer = null;
+
+        DataBufferFactory bufferFactory =
+                                serverWebExchange.getResponse().bufferFactory();
+        serverWebExchange.getResponse().getHeaders()
+                                        .setContentType(MediaType.APPLICATION_JSON);
+
+        if (throwable instanceof BusinessLogicException) {
+            BusinessLogicException ex = (BusinessLogicException) throwable;
+            ExceptionCode exceptionCode = ex.getExceptionCode();
+            errorResponse = ErrorResponse.of(exceptionCode.getStatus(),
+                                                exceptionCode.getMessage());
+            serverWebExchange.getResponse()
+                        .setStatusCode(HttpStatus.valueOf(exceptionCode.getStatus()));
+        } else if (throwable instanceof ResponseStatusException) {
+            ResponseStatusException ex = (ResponseStatusException) throwable;
+            errorResponse = ErrorResponse.of(ex.getStatus().value(), ex.getMessage());
+            serverWebExchange.getResponse().setStatusCode(ex.getStatus());
+        } else {
+            errorResponse = ErrorResponse.of(HttpStatus.INTERNAL_SERVER_ERROR.value(),
+                                                            throwable.getMessage());
+            serverWebExchange.getResponse()
+                                    .setStatusCode(HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+
+        try {
+            dataBuffer =
+                    bufferFactory.wrap(objectMapper.writeValueAsBytes(errorResponse));
+        } catch (JsonProcessingException e) {
+            bufferFactory.wrap("".getBytes());
+        }
+
+        return serverWebExchange.getResponse().writeWith(Mono.just(dataBuffer));
+    }
+}
+```
+
+* ErrorWebFluxAutoConfiguration을 통해 등록된 DefaultErrorWebExceptionHandler 보다 높은 우선순위를 갖도록 Order(-2)를 지정하였다. 
+* ErrorWebExceptionHandler를 구현하면 글로벌하게 동작한다. 
+* ErrorResponse 객체를 DataBuffer로 래핑하여 response body를 구성한다. 
+  * DataBuffer는 netty가 아닌 플랫폼에서도 사용할수있도록 추상화한 바이트 컨테이너이다.
+
 # Chapter 20 WebClient
+
+##  Webclient란
+
+webclient는 spring5부터 지원하는 non-blocking client로써, 블로킹, 논블로킹 둘다 지원한다.
+
+restTemplete을 대체하기도하지만 이제는 그럴 필요가 없다. 스프링부트 3.2부터 RestClient가 있기 때문이다.
+
+## WebClient ConnectionTimeout 설정
+
+커넥션 타임아웃은 클라이언트가 서버에 연결을 시도할 때, 연결이 성공할 때까지 대기하는 최대 시간을 정의하는것이다.
+
+클라이언트가 서버에 연결을 시도한 후, 지정된 시간 내에 연결이 이루어지지 않으면 타임아웃 오류가 발생한다.
+
+ 클라이언트가 너무 오랫동안 서버에 연결하려고 기다리지 않도록 하여, 자원 낭비를 방지하는 목적으로 설정한다.
+
+특정 서버 엔진의 Client Connector 설정을 통해 ConnectionTimeout 설정을 할 수 있다.
+
+* 다양한 서버 엔진을 지원한다. 
+
+```java
+HttpClient httpClient =
+        HttpClient
+                .create()
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 500)
+                .responseTimeout(Duration.ofMillis(500))
+                .doOnConnected(connection ->
+                    connection
+                            .addHandlerLast(
+                                    new ReadTimeoutHandler(500,
+                                                        TimeUnit.MILLISECONDS))
+                            .addHandlerLast(
+                                    new WriteTimeoutHandler(500,
+                                                        TimeUnit.MILLISECONDS)));
+Flux<BookDto.Response> response =
+        WebClient
+                .builder()
+                .baseUrl("http://localhost:8080")
+                .clientConnector(new ReactorClientHttpConnector(httpClient))
+                .build()
+                .get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/v10/books")
+                        .queryParam("page", "1")
+                        .queryParam("size", "10")
+                        .build())
+                .retrieve()
+                .bodyToFlux(BookDto.Response.class);
+response
+        .map(book -> book.getTitleKorean())
+        .subscribe(bookName -> log.info("book name2: {}", bookName));
+```
+
+* **읽기/쓰기 시간 초과 핸들러 추가**: `.doOnConnected(connection -> ...)`를 사용하여 연결된 후 읽기와 쓰기 시간 초과 핸들러를 추가했다. 
+* 500ms 가 초과되면 TimeoutExceptiondㅣ 발생한다. 
+
+
+
+번외 - 주요 서버엔진은 다음과같은 종류가 있다.
+
+
+
+**Reactor Netty**:
+
+- 기본적으로 Spring WebFlux에서 사용하는 서버 엔진
+- `reactor.netty.http.client.HttpClient`를 사용하여 설정
+
+```java
+HttpClient httpClient = HttpClient.create()
+    .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000)
+    .responseTimeout(Duration.ofSeconds(5));
+
+WebClient webClient = WebClient.builder()
+    .clientConnector(new ReactorClientHttpConnector(httpClient))
+    .build();
+```
+
+**Apache HttpClient**:
+
+- Apache의 HttpClient를 사용하여 설정
+- `org.apache.http.impl.nio.client.HttpAsyncClients`를 사용하여 설정
+
+```java
+CloseableHttpAsyncClient client = HttpAsyncClients.custom()
+    .setDefaultRequestConfig(RequestConfig.custom()
+        .setConnectTimeout(5000)
+        .setSocketTimeout(5000)
+        .build())
+    .build();
+
+client.start();
+
+WebClient webClient = WebClient.builder()
+    .clientConnector(new HttpComponentsClientHttpConnector(client))
+    .build();
+```
+
+
+
+**Jetty**:
+
+- Jetty의 HttpClient를 사용할 수 있다.
+- `org.eclipse.jetty.client.HttpClient`를 사용하여 설정
+
+```java
+HttpClient httpClient = new HttpClient();
+httpClient.setConnectTimeout(5000);
+
+WebClient webClient = WebClient.builder()
+    .clientConnector(new JettyClientHttpConnector(httpClient))
+    .build();
+```
+
+
+
+**OkHttp**:
+
+- OkHttp는 Square에서 개발한 자바 기반의 HTTP 클라이언트로, 간단하고 효율적인 API를 제공.
+- `okhttp3.OkHttpClient`를 사용하여 ConnectionTimeout을 설정할 수 있다.
+
+```java
+OkHttpClient okHttpClient = new OkHttpClient.Builder()
+    .connectTimeout(5, TimeUnit.SECONDS)
+    .build();
+
+WebClient webClient = WebClient.builder()
+    .clientConnector(new OkHttp3ClientHttpConnector(okHttpClient))
+    .build();
+```
+
+## exchangeToMono를 사용한 응답 디코딩
+
+`retrieve` 메서드는 `WebClient`에서 HTTP 요청을 보내고 응답 본문을 간단하게 추출하고 처리하는 메서드이다.
+
+retrieve() 대신에 exchangeToMono()나 exchange Toflux() 메서드를 이용 하면 response를 사용자의 요구 조건에 맞게 제어할 수 있다.
+
+```java
+BookDto.Post post = new BookDto.Post("Java 중급",
+        "Intermediate Java",
+        "Java 중급 프로그래밍 마스터",
+        "Kevin1", "333-33-3333-333-3",
+        "2022-03-22");
+
+WebClient webClient = WebClient.create();
+
+webClient.post()
+        .uri("http://localhost:8080/v10/books")
+        .bodyValue(post)
+        .exchangeToMono(response -> {
+            if(response.statusCode().equals(HttpStatus.CREATED))
+                return response.toEntity(Void.class);
+            else
+                return response
+                        .createException()
+                        .flatMap(throwable -> Mono.error(throwable));
+        })
+        .subscribe(res -> {
+            log.info("response status2: {}", res.getStatusCode());
+            log.info("Header Location2: {}", res.getHeaders().get("Location"));
+            },
+            error -> log.error("Error happened: ", error));
+```
+
+* status가 201 CREATED면 ResponseEntity를 리턴, 이외에는 exception을 Mono.error로 던진다.
+
+* ClientResponse의 createException() 메서드는 request/response 정보를 포 함한 WebClientResponseException을 생성한다.
+
 # Chapter 21 Reactive Streaming 데이터 처리
+
+Spring WebFlux는 SSE(Server-Sent Events)를 이용해 데이터를 Streaming할 수 있다. 
+
+SSE는 Spring 4.2 버전부터 지원되었으며, Spring 5 버전부터 Reactor의 Publisher 타 입인 FluX를 이용해 조금 더 편리한 방법으로 SSE를 사용할 수 있게 되었다.
+
+* SSE(Server-Sent Events)는 클라이언트가 HTTP 연결을 통해 서버로부터 전송되는 업데 이트 데이터를 지속적으로 수신할 수 있는 단방향 서버 푸시 기술이다.
+* SSE는 주로 클라이언트 측에서 서버로부터 전송되는 이벤트 스트림을 자동으로 수신하기 위해 사용된다.
+
+db에서 모든 book을 읽어 Streaming하는 예시이다
+
+```java
+public Flux<Book> streamingBooks() {
+    return template
+            .select(Book.class)
+            .all()
+            .delayElements(Duration.ofSeconds(2L));
+}
+
+@Configuration
+public class BookRouter {
+
+  	@Bean
+    public RouterFunction<?> routeStreamingBook(BookService bookService,
+                                                BookMapper mapper) {
+        return route(RequestPredicates.GET("/v11/streaming-books"),
+                request -> ServerResponse
+                        .ok()
+                        .contentType(MediaType.TEXT_EVENT_STREAM)
+                        .body(bookService
+                                        .streamingBooks()
+                                        .map(book -> mapper.bookToResponse(book))
+                                ,
+                                BookDto.Response.class));
+    }
+    
+}
+
+```
+
+* sse를 사용하려면 Content-Type이 text/event-stream 이여야 한다.
+* response는 Flux<Book>으로 지정한다.
+
+다음처럼 요청하면 데이터를 계속 보내게 된다.
+
+```java
+@Slf4j
+@Configuration
+public class BookWebClient {
+    @Bean
+    public ApplicationRunner streamingBooks() {
+        return (ApplicationArguments arguments) -> {
+            WebClient webClient = WebClient.create("http://localhost:8080");
+            Flux<BookDto.Response> response =
+                    webClient
+                            .get()
+                            .uri("http://localhost:8080/v11/streaming-books")
+                            .retrieve()
+                            .bodyToFlux(BookDto.Response.class);
+
+            response.subscribe(book -> {
+                        log.info("bookId: {}", book.getBookId());
+                        log.info("titleKorean: {}", book.getTitleKorean());
+                        log.info("titleEnglish: {}", book.getTitleEnglish());
+                        log.info("description: {}", book.getDescription());
+                        log.info("author: {}", book.getAuthor());
+                        log.info("isbn: {}", book.getIsbn());
+                        log.info("publishDate: {}", book.getPublishDate());
+                        log.info("=======================================");
+                    },
+                    error -> log.error("# error happened: ", error));
+        };
+    }
+}
+
+```
+
+Javascript 기반의 웹 앱에서 수신하기 위해서는 Javascriot APl인 EventSource 객체를 이용하면 된다.
+
+Javascript 기반의 웹 앱에서 Stream Event를 수신하는 방법에 대해 더 알고 싶다면 아래 링크를 참고
+
+https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events

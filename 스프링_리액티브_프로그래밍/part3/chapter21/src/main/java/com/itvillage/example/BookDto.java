@@ -2,7 +2,7 @@ package com.itvillage.example;
 
 import lombok.*;
 
-import javax.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotBlank;
 
 public class BookDto {
     @Getter

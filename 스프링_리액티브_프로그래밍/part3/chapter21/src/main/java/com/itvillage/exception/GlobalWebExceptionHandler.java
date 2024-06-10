@@ -48,8 +48,8 @@ public class GlobalWebExceptionHandler implements ErrorWebExceptionHandler {
                         .setStatusCode(HttpStatus.valueOf(exceptionCode.getStatus()));
         } else if (throwable instanceof ResponseStatusException) {
             ResponseStatusException ex = (ResponseStatusException) throwable;
-            errorResponse = ErrorResponse.of(ex.getStatus().value(), ex.getMessage());
-            serverWebExchange.getResponse().setStatusCode(ex.getStatus());
+            errorResponse = ErrorResponse.of(ex.getStatusCode().value(), ex.getMessage());
+            serverWebExchange.getResponse().setStatusCode(ex.getStatusCode());
         } else {
             errorResponse = ErrorResponse.of(HttpStatus.INTERNAL_SERVER_ERROR.value(),
                                                             throwable.getMessage());

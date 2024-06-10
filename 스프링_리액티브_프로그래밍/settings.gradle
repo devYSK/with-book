@@ -2,4 +2,7 @@ rootProject.name = 'reactive'
 
 include(
         'part2',
+        'part3:chapter18',
+        'part3:chapter18',
+        'part3:chapter21',
 )

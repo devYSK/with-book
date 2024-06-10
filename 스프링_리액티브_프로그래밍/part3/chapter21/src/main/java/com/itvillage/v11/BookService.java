@@ -14,7 +14,7 @@ import reactor.core.publisher.Mono;
 import reactor.util.function.Tuple2;
 import reactor.util.function.Tuples;
 
-import javax.validation.constraints.Positive;
+import jakarta.validation.constraints.Positive;
 import java.time.Duration;
 import java.util.List;
 
