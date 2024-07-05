@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="GradleMigrationSettings" migrationVersion="1" />
+  <component name="GradleSettings">
+    <option name="linkedExternalProjectsSettings">
+      <GradleProjectSettings>
+        <option name="externalProjectPath" value="$PROJECT_DIR$" />
+        <option name="gradleJvm" value="azul-17" />
+        <option name="modules">
+          <set>
+            <option value="$PROJECT_DIR$" />
+            <option value="$PROJECT_DIR$/Chapter01" />
+            <option value="$PROJECT_DIR$/Chapter02" />
+            <option value="$PROJECT_DIR$/Chapter03" />
+            <option value="$PROJECT_DIR$/Chapter04" />
+            <option value="$PROJECT_DIR$/Chapter05" />
+            <option value="$PROJECT_DIR$/Chapter06" />
+            <option value="$PROJECT_DIR$/Chapter07" />
+            <option value="$PROJECT_DIR$/Chapter08" />
+            <option value="$PROJECT_DIR$/Chapter09" />
+          </set>
+        </option>
+      </GradleProjectSettings>
+    </option>
+  </component>
+</project>
