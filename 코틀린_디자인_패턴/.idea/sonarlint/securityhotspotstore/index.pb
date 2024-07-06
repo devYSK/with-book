@@ -35,3 +35,13 @@ X
 .Chapter02/src/main/kotlin/3_AbstractFactory.kt,c/b/cb16852762452351df9be9b3ce699bf041a617b1
 V
 &Chapter02/src/main/kotlin/4_Builder.kt,f/5/f52fe8aa5b1d8f35928e641ca5d825c477e72875
+X
+(Chapter03/src/main/kotlin/1_Decorator.kt,1/a/1a032e2f512f2e00710a3c658ca1f0dd172c8efb
+V
+&Chapter03/src/main/kotlin/2_Adapter.kt,e/f/ef451693f73fa1aac4432a8c5fd2a2ece0640c4a
+U
+%Chapter03/src/main/kotlin/3_Bridge.kt,4/6/466b95cba97af89360fe1192b6dbbaa1493b7d6d
+X
+(Chapter03/src/main/kotlin/4_Composite.kt,e/d/ed938ac621ff784c0b11df13651037d4bf73db61
+U
+%Chapter03/src/main/kotlin/5_Facade.kt,b/0/b0fd9d7f41d2ca187f1256da938c3c8d9a1dc16b

@@ -1,6 +1,7 @@
 import java.lang.IllegalStateException
+import kotlin.properties.Delegates
 
-fun main() {
+fun main2() {
     val starTrekRepository = DefaultStarTrekRepository()
     val withValidating = ValidatingAdd(starTrekRepository)
     val withLoggingAndValidating = LoggingGetCaptain(withValidating)
@@ -37,7 +38,8 @@ class DefaultStarTrekRepository : StarTrekRepository {
     }
 }
 
-class LoggingGetCaptain(private val repository: StarTrekRepository) : StarTrekRepository by repository {
+class LoggingGetCaptain(private val repository: StarTrekRepository)
+    : StarTrekRepository by repository {
     override fun get(starshipName: String): String {
         println("Getting captain for $starshipName")
         return repository[starshipName]
@@ -46,6 +48,7 @@ class LoggingGetCaptain(private val repository: StarTrekRepository) : StarTrekRe
 
 class ValidatingAdd(private val repository: StarTrekRepository) : StarTrekRepository by repository {
     private val maxNameLength = 15
+
     override fun set(starshipName: String, captainName: String) {
         require(captainName.length < maxNameLength) {
             "$captainName name is longer than $maxNameLength characters!"
@@ -55,3 +58,19 @@ class ValidatingAdd(private val repository: StarTrekRepository) : StarTrekReposi
     }
 }
 
+
+class User {
+    var name: String by Delegates.observable("No Name") { _, old, new ->
+        println("Name changed from $old to $new")
+    }
+}
+
+fun main() {
+    val user = User()
+    user.name = "John"
+    println("change")
+    user.name = "Jane"
+    println("change")
+    user.name = "John"
+    println("change")
+}

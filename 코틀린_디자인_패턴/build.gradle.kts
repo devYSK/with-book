@@ -1,7 +1,7 @@
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
-	kotlin("jvm") version "1.8.0"
+	kotlin("jvm") version "1.9.24"
 }
 
 allprojects {
@@ -24,11 +24,10 @@ subprojects {
 		implementation("org.jetbrains.kotlin:kotlin-reflect")
 		implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
 		// Coroutine
-		implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor")
+		implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+//		implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
 		implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
-		implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm")
-		implementation("org.jetbrains.kotlinx:kotlinx-coroutines-slf4j")
-
+		implementation("org.jetbrains.kotlinx:kotlinx-coroutines-jdk8")
 	}
 
 	tasks.withType<KotlinCompile> {
@@ -40,6 +39,11 @@ subprojects {
 
 	tasks.withType<Test> {
 		useJUnitPlatform()
+	}
+
+	configure<JavaPluginExtension> {
+		sourceCompatibility = JavaVersion.VERSION_17
+		targetCompatibility = JavaVersion.VERSION_17
 	}
 
 }
