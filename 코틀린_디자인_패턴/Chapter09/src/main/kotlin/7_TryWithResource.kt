@@ -7,4 +7,7 @@ fun main() {
     br.use {
         println(it.readLines())
     }
+
+    val asb = 1
+
 }

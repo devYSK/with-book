@@ -1032,23 +1032,486 @@ main 워커의 작업 일부를 조수 worker한테 넘길 수 있다.
 
 # 9장. 관용구와 안티 패턴
 
-## 기술적 요구 사항
-## 시야 지정 함수 사용하기
+코틀린 다운 관용구와 피해야할 코드를 학습한다.
+
+## 시야 지정 함수 사용하기 (scope function)
+스코프 함수는 모든 객체에 대해 사용가능하며, 이를 사용하면 반본적인 코드를 줄일 수 있다. 
+
+스코프 함수는 람다식을 받기때문에 일종의 고차함수다. 
+
+### let 함수
+
+let은 nullable 객체에 대해 호출할 수 있으며, 해당 객체가 null이 아닐때에만 함수가 실행된다. 
+
+```kotlin
+fun main() {
+    val clintEastwoodQuotes = mapOf(
+        "The Good, The Bad, The Ugly" to "Every gun makes its own tune.",
+        "A Fistful Of Dollars" to "My mistake: four coffins."
+    )
+    val quote = clintEastwoodQuotes["Unforgiven"]
+
+    if (quote != null) {
+        println(quote)
+    }
+
+    // There is a movie with that name, so let will execute the block
+    clintEastwoodQuotes["A Fistful Of Dollars"]?.let {
+        println(it)
+    }
+
+    // Nothing will be printed, since there's no such movie
+    clintEastwoodQuotes["Unforgiven"]?.let {
+        println(it)
+    }
+}
+```
+
+### apply 함수
+
+블록 내에서 실행 대상 객체를 this로 받으며 실행 후에는 해당 객체를 반환한다. 
+
+가변 객체를 초기화할 때 apply를 유용하게 쓸 수 있다.
+
+```kotlin
+fun main() {
+    val `007` = JamesBond().apply {
+        name = "Sean Connery"
+        movie = "Dr. No"
+    }
+
+    println(`007`.name)
+}
+
+class JamesBond {
+    lateinit var name: String
+    lateinit var movie: String
+    lateinit var alsoStarring: String
+}
+```
+
+### also 함수
+
+ 주로 객체의 상태를 변경하거나 부수적인 작업을 수행할 때 유용하게 사용된다.
+
+ `also` 함수는 주어진 람다 블록을 실행한 후, 원래 객체를 반환한다.
+
+```kotlin
+fun main() {
+    val l = (1..100).toList()
+
+    l.filter { it % 2 == 0 }
+        // 값을 출력하지만, 자료 구조나 데이터를 변경하진 않음 
+        .also { println(it) }
+        .map { it * it }
+}
+```
+
+### run 함수
+
+let과 비슷하지만, 객체를 it 대신 this에 할당한다. 
+
+### with 함수
+
+with 함수는 확장함수가 아니다.
+
+맥락 객체를 인수로 받는다.
+
+**코드 간결성**: 여러 작업을 한 객체에 대해 수행할 때, 객체 이름을 반복하지 않고 간결하게 코드를 작성할 수 있습니다.
+
+**가독성 향상**: 코드의 가독성을 높이고, 특정 객체의 컨텍스트 내에서 작업이 이루어지고 있음을 명확히 합니다.
+
+```kotlin
+fun main() {
+    with(JamesBond()) {
+        name = "Pierce Brosnan"
+
+        println(this.name)
+    }
+}
+```
+
+
+
+여러 스코프 함수를 사용하면 불필요한 코드 반복을 줄일 수 있다. 
+
+
+
 ## 타입 검사와 캐스팅
-## try-with-resources 문의 대안
+
+코틀린에서는 is를 이용해서 어떤 객체가 어떤 타입인지 검사하고, as를 이용해 타입 변환을 한다.
+
+
+
+## try-with-resources 문의 대안 - use()
+
+코틀린에서는 use()함수를 이용해서 try-with-resources를 대체할 수 있다.
+
+```kotlin
+fun main() {
+    val br = BufferedReader(FileReader("./src/main/kotlin/7_TryWithResource.kt"))
+
+    br.use {
+        println(it.readLines())
+    }
+}
+```
+
+
+
+해당 객체는 Closeable 인터페이스를 구현해야 한다.  확장함수 정의가 그렇게 되어있다. 
+
+
+
 ## 인라인 함수
+
+인라인 함수는 컴파일러에게 코드를 매번 복사해서 붙여넣으라고 지시하는것과 같다.
+
+컴파일러는 inline 키워드가 붙은 함수를 호출하는 코드가 보이면 그 위치에 함수 본문 전체를 붙여넣는다. 
+
+어떤 함수가 람다 함수를 인자로 받는 고차함수라면, inline 키워드를 붙여봄직하다.
+
+부가적인 기능을 아래처럼 넣어 쓸 수 있다.
+
+```kotlin
+fun main() {
+    logBeforeAfter {
+        "Inlining"
+    }
+}
+
+inline fun logBeforeAfter(block: () -> String) {
+    println("Before")
+    println(block())
+    println("After")
+}
+```
+
+이렇게 만들어진 바이트코드bytecode를 디컴파일decomple해서 나온 자바 코드를 살펴보면
+
+logBeforeAfter 함수 호출은 전혀 등장하지 않는다. 다음과 같은 코드만 보일 것이다.
+
+```java
+System.out.println("Before");
+System.out.println("Inlining");
+System.out.println("After");
+```
+
+
+
+인라인 함수는 그저 코드를 복사해서 넣는것이기 때문에 함수 길이가 몇 줄 수준을 넘어가면 인라인 함수를 사용해서는 안된다.
+
+그런경우는 일반 함수가 더 효율적이다.
+
+하지만 람다 함수를 입력으로 받는 단일식 함수를 작성한다면 성능 최적화를 이룰 수 있다.
+
+일반적으로 함수 호출에는 다음과 같은 오버헤드가 발생
+
+1. **스택 프레임 생성**: 함수 호출 시 호출 스택에 새로운 프레임이 생성
+2. **매개변수 전달**: 함수의 매개변수를 호출 스택을 통해 전달합니다.
+3. **리턴 주소 저장**: 함수가 종료된 후 다시 돌아올 주소를 저장
+
+이러한 오버헤드는 함수 호출이 빈번하게 발생할 때 성능 저하를 초래할 수 있다. 특히 고차 함수(함수를 매개변수로 받는 함수)를 사용할 때, 람다 표현식이 많이 사용된다면 이러한 오버헤드는 더욱 커진다.
+
+### 인라인 함수의 최적화
+
+인라인 함수는 컴파일 시 함수 호출을 호출 위치로 직접 복사하여 삽입합니다. 이를 통해 다음과 같은 최적화가 가능합니다:
+
+1. **함수 호출 오버헤드 제거**: 함수 호출 시 발생하는 오버헤드를 제거합니다.
+2. **람다 인라인화**: 람다 표현식이 인라인 함수 내부에 직접 삽입되어, 람다 호출 오버헤드가 줄어듭니다.
+
+인라인 함수는 다음과 같은 상황에서 성능 최적화를 이룰 수 있습니다:
+
+1. **고차 함수 사용 시**: 람다 표현식을 매개변수로 받는 고차 함수에서 인라인 함수를 사용하면 람다 호출 오버헤드를 줄일 수 있습니다.
+2. **빈번한 함수 호출**: 짧고 빈번히 호출되는 함수에서 인라인 함수를 사용하면 함수 호출 오버헤드를 줄일 수 있습니다.
+
 ## 대수적 자료형 구현하기
+
+대수적 자료형 (ATD, Algebraic Data Type)은 함수형 프로그래밍에서 사용되는 개념이다.
+
+대수적 자료형은 두 가지 주요 구성 요소를 가지고 있습니다: **곱 타입(Product Type)**과 **합 타입(Sum Type)**.
+
+트리에서 이걸 sum을 구할 수 있다.
+
+```kotlin
+data class Node<T>(
+    val value: T,
+    val left: Tree<T> = Empty,
+    val right: Tree<T> = Empty
+) : Tree<T>
+
+fun Tree<Int>.sum(): Long = when (this) {
+    Empty -> 0
+    is Node -> value + left.sum() + right.sum()
+}
+```
+
+이 sum을 대수적 자료형에 대한 연산이다.
+
 ## 제네릭에서 타입 실체화
+
+인라인 함수는 복사되기 때문에 제네릭의 타입 소거를 피해갈 수 있다.
+
+
+
+다음 제네릭 함수느 ㄴNumber를 입력으로 받고, 자신의 타입과 매개변수 타입이 동일한 경우에만 매개변수를 출력하려고 한다.
+
+그러나 오류가 나면서 컴파일 되지 않는다. 타입이 소거되기 때문이다
+
+```kotlin
+inline fun <T> printIfSameReified(a: Number) {
+    if (a is T) {
+        println("Yes")
+    } else {
+        println("No")
+    }
+}
+```
+
+보통 이럴때 class 값을 넘겨 땜빵할 수 있지만 몇가지 단점이 있다.
+
+```kotlin
+fun <T : Number> printIfSameType(clazz: KClass<T>, a: Number) {
+    if (clazz.isInstance(a)) {
+        println("Yes")
+    } else {
+        println("No")
+    }
+}
+```
+
+1. is 연산자는 사용하지 못하며 반드시 isInstance()함수 사용해야함
+2. 반드시 올바른 clazz를 전달해야 함 .
+
+실체화된(refied)타입을 사용하면 다음과 같이 더 좋은 코드를 작성할 수 있다.
+
+```kotlin
+inline fun <reified T : Number> printIfSameReified(a: Number) {
+    if (a is T) {
+        println("Yes")
+    } else {
+        println("No")
+    }
+}
+
+printIfSameReified<Int>(1) // Print 1, as 1 is Int
+printIfSameReified<Int>(2L) // Prints no, as 2 is Long
+printIfSameReified<Long>(3L) // Prints yes, as 3 is Long
+```
+
+실체화된 타입을 사용하면 다음과 같은 장점이 있다.
+
+- ﻿﻿클래스를 인수로 전달할 필요가 없어서 메서드 시그니처가 더 깔끔해진다.
+- ﻿﻿함수 내에서 is 문법을 사용할 수 있다.
+- ﻿﻿타입 추론이 잘 동작한다. 즉 컴파일러가 추론할 수 있다면 타입 매개변수를 완전히 생략할 수 있다.
+
 ## 상수 효율적으로 사용하기
+
+코틀린에서 상수를 선언할때, companion object를 사용한다
+
+이때 const를 붙이지 않으면 상수를 가져오는 접근자 함수를 생성해서 상수를 사용하는데 단계를 추가해버리는 비효율이 발생한다.
+
+```kotlin
+class Spock {
+    companion object {
+        val SENSE_OF_HUMOR = "None"
+    }
+}
+
+public final class Spock {
+   @NotNull
+   private static final String SENSE_OF_HUMOR = "None";
+   @NotNull
+   public static final Companion Companion = new Companion((DefaultConstructorMarker)null);
+
+   public static final class Companion {
+      @NotNull
+      public final String getSENSE_OF_HUMOR() {
+         return Spock.SENSE_OF_HUMOR;
+      }
+
+      private Companion() {
+      }
+
+      public Companion(DefaultConstructorMarker $constructor_marker) {
+         this();
+      }
+   }
+}
+```
+
+const를 붙이면?
+
+```kotlin
+class Spock {
+    companion object {
+        const val SENSE_OF_HUMOR = "None"
+    }
+}
+
+public final class Spock {
+   @NotNull
+   public static final String SENSE_OF_HUMOR = "None";
+   @NotNull
+   public static final Companion Companion = new Companion((DefaultConstructorMarker)null);
+
+   public static final class Companion {
+      private Companion() {
+      }
+
+      public Companion(DefaultConstructorMarker $constructor_marker) {
+         this();
+      }
+   }
+}
+```
+
+더이상 내부 Companion에서 외부 Spock을 참조하지 않는다.
+
+컴파일러가 상수 값을 인라인화 하였다. 
+
 ## 생성자 오버로딩
-## null 다루기
+
+부 생성자는 반드시 this 키워드를 통해 주 생성자를 호출해야 한다. 
+
 ## 동시성을 명시적으로 나타내기
+동시성을 나타낼때에는 변수나 함수에 async를 붙이는것이 좋다.
+
+```kotlin
+fun main() {
+    runBlocking {
+        // Prints DeferredCoroutine{Active}
+        println("${getResult()}")
+
+        // Prints "OK"
+        println(getResultAsync().await())
+    }
+}
+
+// This will produce a warning
+fun CoroutineScope.getResult() = async {
+    delay(100)
+    "OK"
+}
+
+fun CoroutineScope.getResultAsync() = async {
+    delay(100)
+    "OK"
+}
+```
+
+관례적으로도 이름 뒤에 Async를 붙여 구분한다. 
+
+
+
 ## 입력 유효성 검사하기
+
+require, requireNotNull, check, checkNotNull을 이용할 수 있다. 가독성이 올라간다. 
+
 ## 열거형 대신 봉인 클래스 사용하기
-## 요약
+
+상태와 함께 어떤 데이터를 관리해야 하는 경우 실드 클래스를 사용하면 열거형보다 좋다.
+
+```kotlin
+
+fun main() {
+    var order: PizzaOrderStatus = OrderReceived(Random.nextInt())
+    println(order)
+    order = order.nextStatus()
+    println(order)
+    order = order.nextStatus()
+    println(order)
+    order = order.nextStatus()
+    println(order)
+}
+
+
+// Java-like code that uses enum to represent State
+/*enum class PizzaOrderStatus {
+    ORDER_RECEIVED, PIZZA_BEING_MADE, OUT_FOR_DELIVERY, COMPLETED;
+
+    fun nextStatus(): PizzaOrderStatus {
+        return when (this) {
+            ORDER_RECEIVED -> PIZZA_BEING_MADE
+            PIZZA_BEING_MADE -> OUT_FOR_DELIVERY
+            OUT_FOR_DELIVERY -> COMPLETED
+            COMPLETED -> COMPLETED
+        }
+    }
+}*/
+
+sealed class PizzaOrderStatus(protected val orderId: Int) {
+    abstract fun nextStatus(): PizzaOrderStatus
+}
+
+class OrderReceived(orderId: Int) : PizzaOrderStatus(orderId) {
+    override fun nextStatus() = PizzaBeingMade(orderId)
+}
+
+class PizzaBeingMade(orderId: Int) : PizzaOrderStatus(orderId) {
+    override fun nextStatus() = OutForDelivery(orderId)
+}
+
+class OutForDelivery(orderId: Int) : PizzaOrderStatus(orderId) {
+    override fun nextStatus() = Completed(orderId)
+}
+
+class Completed(orderId: Int) : PizzaOrderStatus(orderId) {
+    override fun nextStatus() = this
+}
+```
+
 ## 질문
 
+### 1. 코틀린에서 자바의 try-with-resources에 해당하는 것은 무엇인가?
+
+코틀린에서는 자바의 `try-with-resources`에 해당하는 기능을 `use` 확장 함수를 통해 제공합니다. `use` 함수는 `Closeable` 또는 `AutoCloseable` 인터페이스를 구현한 객체에 대해 사용될 수 있으며, 블록이 끝나면 자동으로 자원을 해제합니다.
+
+### 2. 코틀린에서 null을 다루는 여러 가지 방법에는 무엇이 있는가?
+
+코틀린은 널 안정성(Null Safety)을 제공하여 널 포인터 예외를 방지하는 여러 가지 기능을 제공합니다.
+
+#### 널 가능 타입 (Nullable Type)
+
+타입 뒤에 `?`를 붙여 널이 될 수 있는 타입을 표시합니다.
+
+#### 안전한 호출 연산자 (Safe Call Operator)
+
+`?.` 연산자를 사용하여 널 가능 변수의 속성이나 메서드에 안전하게 접근합니다. 만약 변수 값이 널이면 전체 표현식의 값이 널이 됩니다.
+
+#### 안전한 타입 캐스팅 (Safe Cast)
+
+`as?` 연산자를 사용하여 안전하게 타입을 캐스팅합니다. 캐스팅이 불가능하면 널을 반환합니다.
+
+#### 널 아님 단언 연산자 (Not-null Assertion Operator)
+
+`!!` 연산자를 사용하여 변수 값이 널이 아님을 단언할 수 있습니다. 값이 널이면 예외를 발생시킵니다.
+
+#### let 함수
+
+널 가능 변수에 대해 특정 작업을 수행할 때 `let` 함수를 사용할 수 있습니다. 변수 값이 널이 아니면 람다 블록이 실행됩니다.
+
+### 체화된 제네릭을 사용하면 어떤 문제를 해결할 수 있는가?
+
+코틀린에서는 제네릭 타입 인수를 런타임에 알 수 없는 문제를 해결하기 위해 **구체화된 제네릭(reified generics)**을 사용할 수 있습니다. 이는 인라인 함수에서 사용되며, 제네릭 타입 인수를 런타임에 알 수 있도록 합니다.
+
+#### 문제점
+
+자바와 코틀린의 일반적인 제네릭 타입은 타입 소거(Type Erasure)를 사용합니다. 이는 런타임에 제네릭 타입 인수가 소거되어 타입 정보를 알 수 없게 되는 문제를 야기합니다.
+
+#### 구체화된 제네릭 예시
+
+코틀린에서 구체화된 제네릭 타입을 사용하면 타입 소거 문제를 해결할 수 있습니다. 구체화된 제네릭 타입은 `inline` 함수와 함께 사용되며, `reified` 키워드를 사용하여 타입 정보를 런타임에 유지할 수 있습니다.
+
+#### 구체화된 제네릭의 사용 예
+
+1. **타입 검사 및 캐스팅**:
+   - 구체화된 제네릭을 사용하면 런타임에 제네릭 타입 인수에 대한 안전한 타입 검사 및 캐스팅을 수행할 수 있습니다.
+2. **제네릭 클래스의 인스턴스 생성**:
+   - 구체화된 제네릭을 사용하여 제네릭 클래스의 인스턴스를 생성할 수 있습니다. 이는 일반 제네릭에서는 불가능합니다.
+
 # 10장. Ktor를 이용한 동시성 마이크로서비스
+
 ## 기술적 요구 사항
 ## Ktor 시작하기
 ## 요청 라우팅

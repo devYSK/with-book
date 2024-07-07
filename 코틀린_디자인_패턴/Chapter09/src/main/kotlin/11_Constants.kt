@@ -4,7 +4,7 @@ fun main() {
 
 class Spock {
     companion object {
-        val SENSE_OF_HUMOR = "None"
+        const val SENSE_OF_HUMOR = "None"
     }
 }
 
