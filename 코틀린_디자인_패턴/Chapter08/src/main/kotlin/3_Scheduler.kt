@@ -5,13 +5,13 @@ import java.util.concurrent.ForkJoinPool
 fun main() {
     runBlocking {
 
-        // This will use the Dispatcher from the parent coroutine
+        // 부모 코루틴의 디스패처를 사용 (main)
         launch {
-            // Prints: main
+            // main을 출력
             println(Thread.currentThread().name)
         }
         launch(Dispatchers.Default) {
-            // Prints DefaultDispatcher-worker-1
+            // DefaultDispatcher-worker-1를 사용
             println(Thread.currentThread().name)
         }
 

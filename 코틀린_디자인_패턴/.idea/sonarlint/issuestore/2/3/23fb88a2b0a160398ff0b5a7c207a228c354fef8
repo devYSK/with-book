@@ -1,0 +1,17 @@
+
+Hkotlin:S1172<"+Remove this unused function parameter "id".(¯ü†àùÿÿÿÿ
+Hkotlin:S1172A"+Remove this unused function parameter "id".(°³º¹üÿÿÿÿ
+Bkotlin:S1172G"+Remove this unused function parameter "id".(æªŽe
+Hkotlin:S1172U"+Remove this unused function parameter "id".(ì±æýÿÿÿÿ
+Ckotlin:S1172Z"+Remove this unused function parameter "id".(°®¿Ù
+Bkotlin:S1172_"+Remove this unused function parameter "id".(Ö™Ã	
+Bkotlin:S1172#"+Remove this unused function parameter "id".(ª„ƒ(
+Hkotlin:S1172("+Remove this unused function parameter "id".(ÍØù“úÿÿÿÿ
+Ckotlin:S1172-"+Remove this unused function parameter "id".(Ð‹©
+6kotlin:S125h"Remove this commented out code.(–±Ù
+qkotlin:S6306<"TUsing "GlobalScope" here leads to the breaking of structured concurrency principles.(¯ü†àùÿÿÿÿ
+qkotlin:S6306B"TUsing "GlobalScope" here leads to the breaking of structured concurrency principles.(¬Î¯øÿÿÿÿ
+kkotlin:S6306G"TUsing "GlobalScope" here leads to the breaking of structured concurrency principles.(æªŽe
+7kotlin:S1128"Remove this unused import.(žúŸÒþÿÿÿÿ
+7kotlin:S1128"Remove this unused import.(·þ÷ûÿÿÿÿ
+kotlin:S1192/"bDefine a constant instead of duplicating this literal "Alexey Soshin, Software Architect" 3 times.(ÁçÚûÿÿÿÿ

@@ -4,7 +4,7 @@ fun main() {
     val ascii = mutableListOf<Int>()
 
     for (l in letters) {
-        ascii.add(l.toInt())
+        ascii.add(l.code)
     }
 
     println(ascii)

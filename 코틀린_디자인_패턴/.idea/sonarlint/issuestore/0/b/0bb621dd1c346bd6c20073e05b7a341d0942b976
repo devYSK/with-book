@@ -1,0 +1,5 @@
+
+4kotlin:S6310"Avoid hardcoded dispatchers.(Ö¬ÕŸ
+Ekotlin:S1481"-Remove this unused "children" local variable.(ÙÍà±
+Ckotlin:S1481"+Remove this unused "parent" local variable.(Ö¬ÕŸ
+ikotlin:S3776"RRefactor this method to reduce its Cognitive Complexity from 21 to the 15 allowed.(†•ü7

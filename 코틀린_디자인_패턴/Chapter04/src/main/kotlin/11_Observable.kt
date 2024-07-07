@@ -57,6 +57,7 @@ class Cat {
 typealias Times = Int
 
 enum class SoundPitch { HIGH, LOW }
+
 interface Message {
     val repeat: Times
     val pitch: SoundPitch

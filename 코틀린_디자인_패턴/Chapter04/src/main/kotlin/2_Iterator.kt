@@ -26,10 +26,12 @@ fun main() {
 class TrooperIterator(private val units: List<Trooper>) : Iterator<Trooper> {
     private var i = 0
     private var iterator: Iterator<Trooper> = this
+
     override fun hasNext(): Boolean {
         if (i >= units.size) {
             return false
         }
+
         if (i == units.size - 1) {
             if (iterator != this) {
                 return iterator.hasNext()
