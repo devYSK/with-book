@@ -2960,17 +2960,17 @@ public class PublisherProbeExample {
 
 
 
-# Chapter 14 Operators
+# y
 
-## Operator란?
+## 
 
 리액터 Operator(연산자)는 리액터에서 데이터 스트림을 변환하거나 조작하기 위한 함수형 인터페이스다. 연산자를 사용하여 데이터 스트림을 다양한 방식으로 처리할 수 있다. 
 
-* just, create, filter, map 등등
+* 
 
 Operator는 너무 많기 때문에 Reactor 공식 문서에서 어떤 상황에 어떤 유형의 Operator가 적합한지 정의해서 도와준다.
 
-* reactor docs: https://projectreactor.io/docs/core/release/reference/
+* 
 * operator docs : https://projectreactor.io/docs/core/release/reference/#which-operator
 
 또한 Operator는 마블 다이어그램으로 같이 해석할 수 있다.
@@ -3115,9 +3115,9 @@ public class Example14_8 {
 1. generate()의 첫 파라미터는 emit할 숫자의 초깃값. 음수 양수 모두 가능
 2. S는 State의 약자로, 초깃값으로 지정한 숫자부터 emit하고 emit한 숫자를 증가시켜서 1씩 증가하는 숫자를 상태값으로 정의함
 
-프로그래밍 방식으로 Signal 이벤트를 발생시키며, 동기적으로 데이터를 하나씩 순차적으로 emit해야 하는경우 사용된다
 
-**동적 데이터 생성**: `generate()`는 상태를 초기화하고, 반복적으로 상태를 업데이트하면서 데이터를 생성.
+
+
 
 **상태 관리**: 내부적으로 상태를 관리하며, 매번 새로운 데이터를 생성할 때 상태를 갱신.
 
@@ -3125,11 +3125,11 @@ public class Example14_8 {
 
 ### create
 
-create Operator는 한번에 여러건의 데이터를 비동기적으로 emit할 수 있다.
 
-`create()`는 `generate()`와 유사하지만, 더 복잡한 비동기 로직이나 콜백을 처리할 수 있다.
 
-비동기 작업이나 콜백을 이용해서 데이터를 처리할 수 있으며, 백프레셔를 지원한다.
+
+
+
 
 ```java
 @Slf4j
@@ -3360,6 +3360,428 @@ and() Operator는 모든 작업이 끝난 시점에 최종적으로 후처리 �
 `collectList` 연산자는 Publisher의 모든 요소를 하나의 리스트로 수집한다. 스트림이 완료될 때까지 기다린 후 리스트를 생성한다.
 
  만약 비어있다면 emptyList를 emit한다
+
+```java
+@Slf4j
+public class Example14_40 {
+    public static void main(String[] args) {
+        Flux
+            .just("...", "---", "...")
+            .map(Example14_40::transformMorseCode)
+            .collectList()
+            .subscribe(list -> log.info(list.stream().collect(Collectors.joining())));
+    }
+
+    public static String transformMorseCode(String morseCode) {
+        return SampleData.morseCodeMap.get(morseCode);
+    }
+}
+```
+
+
+
+# Chapter 14 Operators
+
+## Operator란?
+
+리액터 Operator(연산자)는 리액터에서 데이터 스트림을 변환하거나 조작하기 위한 함수형 인터페이스다. 연산자를 사용하여 데이터 스트림을 다양한 방식으로 처리할 수 있다. 
+
+* just, create, filter, map 등등
+
+Operator는 너무 많기 때문에 Reactor 공식 문서에서 어떤 상황에 어떤 유형의 Operator가 적합한지 정의해서 도와준다.
+
+* reactor docs: https://projectreactor.io/docs/core/release/reference/
+* operator docs : https://projectreactor.io/docs/core/release/reference/#which-operator
+
+또한 Operator는 마블 다이어그램으로 같이 해석할 수 있다.
+
+
+
+## Sequence 생성을 위한 Operator
+
+
+
+### justOrEmpty
+
+<img src="./images//image-20240607130030355.png" width = 450>
+
+* just의 확장 Operator로써, null이여도 NPE가 발생하지 않고 onComplete 시그널을 전송한다. 
+* Optional로 null을 감싸도 결과는 같다
+
+```java
+Mono.justOrEmpty(null)
+  .subscribe(data -> {}, 
+            error -> {},
+             () -> log.info ("# onComplete"));
+```
+
+### fromIterable & fromStream
+
+<img src="./images//image-20240607130850054.png" width = 450>
+
+* Iterable에 포함된 데이터를 emit하는 Flux를 생성한다.
+
+* List, queue, set, 컬렉션은 다 가능하단 소리임
+
+```java
+Flux.fromIterable(anyList)
+  .subscribe(~~)
+```
+
+자매품으로 Stream을 받아 Stream에 포함된 데이터를 emit하는 fromStream도 있다. 
+
+* 자바 스트림 특성상 재사용 불가능
+
+```java
+Flux.fromStream(() -> anyList.stream())
+```
+
+### range
+
+range(n, m) 오퍼레이터는 n부터 1씩 증가한 연속된 수를 m개 emit하는 플럭스를 생성한다.
+
+* for문 등과 같이 사용하기에 유리하다. 
+
+```java
+Flux.range(5, 10)
+  .subscribe(data -> log.info(data))
+```
+
+### defer
+
+<img src="./images//image-20240607131311503.png" width = 550>
+
+> defer는 연기하다 미루다라는 뜻이다. 지연이라는 의미 
+
+defer()는 Operator를 선언한 시점에 emit하는 것이 아닌, 구독하는 시점에 Flux 또는 Mono를 생성한다.
+
+지연 평가(lazy evaluation)를 통해 특정 작업을 필요할 때까지 미루기 위해 사용된다.
+
+이를 통해 연산을 호출할 때마다 새로운 Publisher(Flux 또는 Mono)를 생성할 수 있다.
+
+* 이는 `defer()` 블록 안에 정의된 코드를 구독할 때마다 실행한다는 것을 의미하는것. 
+
+활용 예 
+
+- **동적 데이터 생성**:  데이터베이스에서 동적으로 데이터를 가져와야 하는 경우, `defer()`를 사용하면 각 구독 시점에 데이터베이스 쿼리가 실행되도록 할 수있다.
+- **다양한 환경 설정**: 설정이나 환경에 따라 Publisher의 동작이 달라져야 하는 경우, `defer()`를 사용하여 이를 유연하게 처리할 수 있다.
+
+단점
+
+* 코드 복잡도 증가 가능. 이는 디버깅 어려움으로 이어짐 
+* 구독시점마다 퍼블리셔 생성하므로 구독/해지가 자주 발생하면 성능문제 일으킬 수 있다
+
+예시를 보자
+
+```java
+@Slf4j
+public class Example14_7 {
+    public static void main(String[] args) throws InterruptedException {
+        log.info("# start: {}", LocalDateTime.now());
+        Mono
+            .just("Hello")
+            .delayElement(Duration.ofSeconds(3))
+            .switchIfEmpty(sayDefault())
+//            .switchIfEmpty(Mono.defer(() -> sayDefault()))
+            .subscribe(data -> log.info("# onNext: {}", data));
+
+        Thread.sleep(3500);
+    }
+
+    private static Mono<String> sayDefault() {
+        log.info("# Say Hi");
+        return Mono.just("Hi");
+    }
+}
+//
+[main] INFO - # start: 2024-06-07T13:26:41.438537
+[main] DEBUG- Using Slf4j logging framework
+[main] INFO - # Say Hi
+[parallel-1] INFO - # onNext: Hello
+```
+
+* 데이터가 없으면 switchIfEmpty()내부에서 sayDefault를 호출해서 디폴트값으로 HI를 출력하려고 한다.
+* 그런데, 현재는 Hello가 무조건 있으니까 sayDefault메소드가 실행될 필요가 없다.
+* 그런데 결과를 보면 불필요하게 log.info Say Hi를 출력하는것이 보인다.
+* 이걸 주석친 Mono.defer()를 이용하게 되면, 실제 데이터가 없을때에만 호출하게 된다. 
+
+### using
+
+<img src="./images//image-20240607133826508.png" width = 550>
+
+ using Operator는 파라미터로 전달받은 resource를 emit하는 Flux를 생성한다.
+
+Reactor 및 RxJava 라이브러리에서 리소스를 안전하게 관리하고 해제하는 데 사용되는 연산자로 주로 파일, 데이터베이스 연결, 네트워크 소켓 등과 같은 외부 리소스를 사용할 때 유용하다.
+
+```java
+@Slf4j
+public class Example14_8 {
+    public static void main(String[] args) {
+        Path path = Paths.get("D:\\resources\\using_example.txt");
+
+        Flux
+            .using(() -> Files.lines(path), Flux::fromStream, Stream::close)
+            .subscribe(log::info);
+    }
+}
+```
+
+* 첫번째 파라미터 : 읽어올 resource
+* 두번째 : emit하는  publisher
+* 세번쨰 : 종료 시그널시 resource 해제 등 후처리 
+
+### generate
+
+<img src="./images//image-20240607134656200.png" width = 550>
+
+1. generate()의 첫 파라미터는 emit할 숫자의 초깃값. 음수 양수 모두 가능
+2. S는 State의 약자로, 초깃값으로 지정한 숫자부터 emit하고 emit한 숫자를 증가시켜서 1씩 증가하는 숫자를 상태값으로 정의함
+
+프로그래밍 방식으로 Signal 이벤트를 발생시키며, 동기적으로 데이터를 하나씩 순차적으로 emit해야 하는경우 사용된다
+
+**동적 데이터 생성**: `generate()`는 상태를 초기화하고, 반복적으로 상태를 업데이트하면서 데이터를 생성.
+
+**상태 관리**: 내부적으로 상태를 관리하며, 매번 새로운 데이터를 생성할 때 상태를 갱신.
+
+**종료 조건**: 특정 조건에 도달하면 시퀀스를 종료할 수 있다.
+
+### create
+
+create Operator는 한번에 여러건의 데이터를 비동기적으로 emit할 수 있다.
+
+`create()`는 `generate()`와 유사하지만, 더 복잡한 비동기 로직이나 콜백을 처리할 수 있다.
+
+비동기 작업이나 콜백을 이용해서 데이터를 처리할 수 있으며, 백프레셔를 지원한다.
+
+```java
+@Slf4j
+public class Example14_12 {
+    static int SIZE = 0;
+    static int COUNT = -1;
+    final static List<Integer> DATA_SOURCE = Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+
+    public static void main(String[] args) {
+        log.info("# start");
+        Flux.create((FluxSink<Integer> sink) -> {
+            sink.onRequest(n -> {
+                try {
+                    Thread.sleep(1000L);
+                    for (int i = 0; i < n; i++) {
+                        if (COUNT >= 9) {
+                            sink.complete();
+                        } else {
+                            COUNT++;
+                            sink.next(DATA_SOURCE.get(COUNT));
+                        }
+                    }
+                } catch (InterruptedException e) {}
+            });
+
+            sink.onDispose(() -> log.info("# clean up"));
+        }).subscribe(new BaseSubscriber<>() {
+            @Override
+            protected void hookOnSubscribe(Subscription subscription) {
+                request(2);
+            }
+
+            @Override
+            protected void hookOnNext(Integer value) {
+                SIZE++;
+                log.info("# onNext: {}", value);
+                if (SIZE == 2) {
+                    request(2);
+                    SIZE = 0;
+                }
+            }
+
+            @Override
+            protected void hookOnComplete() {
+                log.info("# onComplete");
+            }
+        });
+    }
+}
+```
+
+* subscribe 발생시  BaseSubscriber의 hookOnSubscribe() 메서드 내부에서 request(2)를 호출하여 한 번에 두 개의 데이터를 요청
+* Subscriber 쪽에서 request() 메서드를 호출하면 create() Operator 내부 에서 sinkonRequest() 메서드의 람다 표현식이 실행
+* Subscriber가 요청한 개수만큼 데이터를 emit
+* BaseSubscriber의 hookOnNext() 메서드 내부에서 emit된 데이터를 로그로 출력한 후, 다시 request(2)를 호출하여 두 개의 데이터를 요청
+* 2에서 4의 과정이 반복되다가 dataSource List의 숫자를 모두 emit하면 onComplete Signal을 발생
+* BaseSubscriber의 hookOnComplete() 메서드 내부에서 종료 로그를 출력
+
+
+
+백프레셔 동작과정
+
+1. 구독자가 처음에 `request(2)`를 호출하여 2개의 데이터를 요청
+2. `onRequest` 핸들러가 호출되어 2개의 데이터를 생성하고 `sink.next`를 통해 구독자에게 전송
+3. 구독자가 데이터를 수신하고 `hookOnNext` 메서드가 호출
+4. 구독자가 2개의 데이터를 처리하면 다시 `request(2)`를 호출하여 추가로 2개의 데이터를 요청
+5. 이 과정이 반복되며, 구독자가 요청한 만큼의 데이터만 생성되고 전송
+
+## Sequence Filtering
+
+`filter` 연산자는 조건에 맞지 않는 데이터를 걸러내는 데 사용
+
+```java
+Flux.range(1, 20)
+    .filter(num -> num % 2 != 0) // 홀수만  
+    .subscribe(data -> log.info("# onNext: {}", data));
+
+// filterWhen 연산자는 각 백신 이름에 대해 비동기 필터링을 수행
+// publishOn(Schedulers.parallel())은 이 필터링 작업을 병렬 스케줄러에서 실행
+Flux
+    .fromIterable(SampleData.coronaVaccineNames)
+    .filterWhen(vaccine -> Mono
+                            .just(vaccineMap.get(vaccine).getT2() >= 3_000_000)
+                            .publishOn(Schedulers.parallel()))
+    .subscribe(data -> log.info("# onNext: {}", data));
+```
+
+`skip` 연산자는 스트림의 처음 N개의 요소를 건너뛰는 데 사용되며, 처음 몇 개의 요소를 생략하고 나머지 요소만을 처리하고자 할 때 유용
+
+```java
+Flux.interval(Duration.ofSeconds(1)) // 0, 1 제외
+    .skip(2)
+    .subscribe(data -> log.info("# onNext: {}", data));
+```
+
+`take` 연산자는 스트림의 처음 N개의 요소만을 가져오는 데 사용. 특정 개수의 요소만을 처리하고자 할 때 유용
+
+```java
+Flux.interval(Duration.ofSeconds(1))
+    .take(3) // 3개만 가져옴 
+    .subscribe(data -> log.info("# onNext: {}", data));
+```
+
+takeLast로 마지막 n개만 emit할수도 있다.
+
+```java
+Flux.fromIterable(SampleData.btcTopPricesPerYear)
+    .takeLast(2)
+    .subscribe(tuple -> log.info("# onNext: {}, {}",
+                                    tuple.getT1(), tuple.getT2()));
+```
+
+`next`는 스트림에 새로운 데이터를 전달 첫번째 데이터만 emit하는 역할을 한다.
+
+```java
+Flux.fromIterable(SampleData.btcTopPricesPerYear)
+  .next()
+  .subscribe(tuple -> log.info("# onNext: {}, {}", tuple.getT1(), tuple.getT2()));
+```
+
+* Upstream에서 emit되는 데이터가 empty면 emptyMono를 emit
+
+## Sequence 변환 Operator
+
+map() Operator는 Upstream에서 emit된 데이터를 mapper Function을 사용 하여 변환한 후, Downstream으로 emit한다.
+
+```java
+Flux.just("1-Circle", "3-Circle", "5-Circle")
+  .map(circle -> circle.replace("Circle", "Rectangle")) // Rectangle로 변환 
+  .subscribe(data -> log.info("# onNext: {}", data));
+```
+
+`flatMap`은 각 요소를 비동기적으로 처리할 수 있는 Publisher로 변환한 후, 이러한 Publisher들을 병합하여 하나의 큰 Publisher로 만든다. 내부 InnerSequence에서 평탄화 (flat)하는 과정을 거쳐 하나의 sequence로 병합(merge)되어 요소들을 다운스트림으로 보낸다.
+
+```java
+Flux.just("Good", "Bad")
+    .flatMap(feeling -> Flux.just("Morning", "Afternoon", "Evening")
+                            .map(time -> feeling + " " + time))
+    .subscribe(log::info);
+```
+
+* good, bad 플럭스 요소가, 내부 이너 시퀀스에서 총 3번씩 연산되어 더해져 6개가 방출된다. 
+
+`concat` 연산자는 여러 Publisher를 순차적으로 결합하여 순차적으로 emit한다. (순서 보장)
+
+먼저 입력된 publisher의 sequence가 종료될때까지 나머지는 대기하게 된다.
+
+```java
+Flux.concat(Flux.just(1, 2, 3), Flux.just(4, 5))
+  .subscribe(data -> log.info("# onNext: {}", data));
+```
+
+* 123이 다 방출되기전엔 45는 방출 안됌
+
+`merge` 연산자는 여러 Publisher를 병합하여 동시에 데이터를 방출하며 concat과 달리 순서는 보장되지 않는다.
+
+merge는 emit된 데이터를 인터리빙 방식으로 병합한다.
+
+<img src="./images//image-20240607152348615.png" width = 450>
+
+* 인터리브 : 교차로 배차하다. merge의 마블 다이어그램을 보면 서로 교차되는 방식으로 merge됌 
+* 그렇다고 번갈아가면서 되는건 아니고, 시간순서대로 먼저 emit된 요소가 먼저 merge됌 
+
+또한 concat과 달리, 나머지 publisher의 sequence과 subscribe 되지 않고 대기하는것이 아니라 즉시 subscribe 된다.
+
+```java
+Flux.merge(
+            Flux.just(1, 2, 3, 4).delayElements(Duration.ofMillis(300L)),
+            Flux.just(5, 6, 7).delayElements(Duration.ofMillis(500L))
+    )
+    .subscribe(data -> log.info("# onNext: {}", data));
+// 결과는 순서보장 되지 않음 
+```
+
+* 결과를 보면 각 flux publisher가 emit하는 시간이 빠른 데이터부터 차례대로 emit함 
+
+![image-20240607152649611](./images//image-20240607152649611.png)
+
+`zip` 연산자는 여러 Publisher의 요소를 조합하여 새로운 요소를 생성한다. 
+
+각 Publisher의 동일한 순서의 요소들이 하나로 결합된다.
+
+![image-20240607152744610](./images//image-20240607152744610.png)
+
+각 Publisher가 데이터를 하나씩 emit할 때까지 기다렸다가 결합하게 된다.
+
+```java
+Flux.zip(
+            Flux.just(1, 2, 3).delayElements(Duration.ofMillis(300L)),
+            Flux.just(4, 5, 6).delayElements(Duration.ofMillis(500L))
+    )
+    .subscribe(tuple2 -> log.info("# onNext: {}", tuple2));
+```
+
+* 두개의 Flux가 emit하는 시간이 다르지만, 각 flux에서 하나씩 emit할때까지 기다렷다가 묶어서 subscriber에게 전달한다.
+* 뭐 bff 등에서 많이 쓰일거같다
+
+`and` 연산자는 두 Publisher가 모두 완료될 때까지 기다린다. 이 연산자는 주로 두 작업의 완료를 동기화하는 데 사용된다
+
+결과적으로 Subscriber에게 onComplete Signal만 전달되고, Upstream에서 emit된 데이터는 전달되지 않는다. 즉, and() Operator는 모든 Sequence가 종료되길 기다렸다가 최종적으로 onComplete Signal만 전송된다.
+
+```java
+Mono.just("Task 1")
+  .delayElement(Duration.ofSeconds(1))
+  .doOnNext(data -> log.info("# Mono doOnNext: {}", data))
+  .and(
+    Flux
+      .just("Task 2", "Task 3")
+      .delayElements(Duration.ofMillis(600))
+      .doOnNext(data -> log.info("# Flux doOnNext: {}", data))
+  )
+  .subscribe(
+    data -> log.info("# onNext: {}", data),
+    error -> log.error("# onError:", error),
+    () -> log.info("# onComplete")
+  );
+// 결과
+INFO - # Flux doOnNext: Task 2
+INFO - # Mono doOnNext: Task 1
+INFO - # Flux doOnNext: Task 3
+INFO - # onComplete
+```
+
+* doOnNext를 통해 emit되는것을 볼 순 있지만, 최종적으로 Subscriber에게는 onComplete Signal만 전송되었음을 알 수 있다.
+
+and() Operator는 모든 작업이 끝난 시점에 최종적으로 후처리 작업을 수행하기 적합한 Operator이다.
+
+`collectList` 연산자는 Publisher의 모든 요소를 하나의 리스트로 수집한다. 스트림이 완료될 때까지 기다린 후 리스트를 생성한다.
+
+ 만약 비어있다면 emptyList를 emit한다
 
 ```java
 @Slf4j
