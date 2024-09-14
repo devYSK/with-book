@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+// 1 패키지 이름이 들어갑니다.
+option go_package = "grpcchat/chatproto";
+
+package chatproto;
+
+// 2 서비스 정의입니다. Chat() 함수를 포함하고 있습니다.
+service ChatService {
+    rpc Chat(stream ChatMsg) returns (stream ChatMsg) {}
+}
+ 
+// 3 Chat 기능에 사용되는 구조체 정의입니다.
+message ChatMsg {
+    string sender = 1;
+    string message = 2;
+}
