@@ -1159,6 +1159,45 @@ fun main() {
 
 ## 7.4. 구조화와 Job
 
+부모  Job이 없는 Job을 루트 Job이라고 하고, 이 Job에 의해 제어되는 코루틴을 루트 코루틴이라고 한다.
+
+
+
+CoroutineScope는 코루틴 실행 환경으로 CoroutineContext객체를 갖기 때문에 기존 코루틴의 구조화를 깰 수 있다.
+
+```kotlin
+
+fun main() = runBlocking<Unit> { // 루트 Job 생성
+  val newScope = CoroutineScope(Dispatchers.IO) // 새로운 루트 Job 생성
+
+  newScope.launch(CoroutineName("Coroutine1")) { // Coroutine1 실행
+    launch(CoroutineName("Coroutine3")) { // Coroutine3 실행
+      delay(100L)
+      println("[${Thread.currentThread().name}] 코루틴 실행")
+    }
+    launch(CoroutineName("Coroutine4")) { // Coroutine4 실행
+      delay(100L)
+      println("[${Thread.currentThread().name}] 코루틴 실행")
+    }
+  }
+
+  newScope.launch(CoroutineName("Coroutine2")) { // Coroutine2 실행
+    launch(CoroutineName("Coroutine5")) { // Coroutine5 실행
+      delay(100L)
+      println("[${Thread.currentThread().name}] 코루틴 실행")
+    }
+  }
+}
+/*
+// 결과:
+Process finished with exit code 0
+*/
+```
+
+이렇게 구조화를 깨면 아무 결과가 안나오는데, runBlokcing 코루틴이 자식들이 구조화가 깨져서 자식들을 기다리지 않고 먼저 종료되기 때문이다. 
+
+
+
 ## 7.5. 요약
 
 
