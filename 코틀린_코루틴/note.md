@@ -2130,16 +2130,542 @@ suspend fun main(): Unit = coroutineScope {
 
 ```
 
+## 23장 플로우 처리
+
+오퍼레이터이다.
+
+
+
+map
+
+-> 각 원소를 변환 함수에 따라 변환한다
+
+filter
+
+-> 원래 플로우에서 주어진 조건에 맞는 값들만 가진 플로우를 반환한다.
+
+take, drop
+
+-> 특정 수의 원소만 통과시키기 위해 take를 사용한다
+
+```kotlin
+suspend fun main() {
+    ('A'..'Z').asFlow()
+        .take(5) // [A, B, C, D, E]
+        .collect { print(it) } // ABCDE
+}
+```
+
+-> drop 사용시 특정 수의 원소를 무시한다
+
+```kotlin
+suspend fun main() {
+    ('A'..'Z').asFlow()
+        .drop(20) // [U, V, W, X, Y, Z]
+        .collect { print(it) } // UVWXYZ
+}
+```
+
+### merge, zip, combine
+
+여러 플로우를 합쳐 여러 플로우에서 생성된 원소를 합한다
+
+```kotlin
+suspend fun main() {
+    val ints: Flow<Int> = flowOf(1, 2, 3)
+    val doubles: Flow<Double> = flowOf(0.1, 0.2, 0.3)
+
+    val together: Flow<Number> = merge(ints, doubles)
+    print(together.toList())
+    // [1, 0.1, 0.2, 0.3, 2, 3]
+    // or [1, 0.1, 0.2, 0.3, 2, 3]
+    // or [0.1, 1, 2, 3, 0.2, 0.3]
+    // or any other combination
+}
+```
+
+merge는 한 플로우의 원소가 다른 플로우를 기다리지 않고 먼저 방출되는 순으로 처리된다
+
+zip은 두 플로우로부터 쌍을 만든다.
+
+```kotlin
+suspend fun main() {
+    val flow1 = flowOf("A", "B", "C")
+        .onEach { delay(400) }
+    val flow2 = flowOf(1, 2, 3, 4)
+        .onEach { delay(1000) }
+    flow1.zip(flow2) { f1, f2 -> "${f1}_${f2}" }
+        .collect { println(it) }
+}
+// (1 sec)
+// A_1
+// (1 sec)
+// B_2
+// (1 sec)
+// C_3
+```
+
+각 원소는 쌍의 일부가 되므로 쌍이 될 원소를 기다린다.
+
+쌍을 이루지 못하고 남은 원소는 유실된다. 
+
+
+
+combine을 사용하면 모든 새로운 원소가 전임자를 대체한다. 첫 번째 쌍이 이미 만들어 졌다면 다른 플로우의 이전 원소와 함께 새 쌍이 만들어진다. 
+
+combine은 zip과 다르게 두 플로우 모두 닫힐때까지 원소를 내보낸다 
+
+```kotlin
+suspend fun main() {
+    val flow1 = flowOf("A", "B", "C")
+        .onEach { delay(400) }
+    val flow2 = flowOf(1, 2, 3, 4)
+        .onEach { delay(1000) }
+    flow1.combine(flow2) { f1, f2 -> "${f1}_${f2}" }
+        .collect { println(it) }
+}
+```
+
+### flatMapConcat, flatMapMerge, flatMapLatest
+
+flatMap은없다.
+
+flatMapConcat은 생성된 플로우를 하나씩 처리한다. 그래서 두번째 플로우는 첫번째 플로우가 완료되었을 때 시작할 수 있다.
+
+```kotlin
+fun flowFrom(elem: String) = flowOf(1, 2, 3)
+    .onEach { delay(1000) }
+    .map { "${it}_${elem} " }
+
+suspend fun main() {
+    flowOf("A", "B", "C")
+        .flatMapConcat { flowFrom(it) }
+        .collect { println(it) }
+}
+```
+
+flatMapMerge는 만들어진 플로우를 동시에 처리한다
+
+```kotlin
+fun flowFrom(elem: String) = flowOf(1, 2, 3)
+    .onEach { delay(1000) }
+    .map { "${it}_${elem} " }
+
+suspend fun main() {
+    flowOf("A", "B", "C")
+        .flatMapMerge { flowFrom(it) }
+        .collect { println(it) }
+}
+
+```
+
+flatMapMerge는 각 원소에 대한 데이터를 요청할때 주로 사용된다. 
+
+예를들어 종류별로 요청을 보낼때~
+
+```kotlin
+suspend fun getOffers(
+    categories: List<Category>
+): List<Offer> = coroutineScope {
+    categories
+        .map { async { api.requestOffers(it) } }
+        .flatMap { it.await() }
+}
+
+// A better solution
+suspend fun getOffers(
+    categories: List<Category>
+): Flow<Offer> = categories
+    .asFlow()
+    .flatMapMerge(concurrency = 20) {
+        flow { emit(api.requestOffers(it)) }
+        // or suspend { api.requestOffers(it) }.asFlow()
+    }
+```
+
+flatMapLatest는 새로운 플로우가 나타나면 이전에 처리하던 플로우를 잊어 사라지게 한다.
+
+### 재시도 (retry)
+
+예외 발생 뒤 메시지를 보내는건 불가능하지만, 각 단계가 이전 단계에 대한 참조를 가지고 있어서 retry랑 retryWhen이 가능하다
+
+```kotlin
+suspend fun main() {
+    flow {
+        emit(1)
+        emit(2)
+        error("E")
+        emit(3)
+    }.retry(3) {
+        print(it.message)
+        true
+    }.collect { print(it) } // 12E12E12E12(exception thrown)
+}
+
+fun makeConnection(config: ConnectionConfig) = api
+    .startConnection(config)
+    .retryWhen { e, attempt ->
+        delay(100 * attempt)
+        log.error(e) { "Error for $config" }
+        e is ApiException && e.code !in 400..499
+    }
+```
+
 
 
 
 
 ## 24장 공유플로우와 상태플로우
 
+### 공유 플로우
+
+브로드캐스트 채널과 비슷한 MutableSharedFlow가 있다.
+
+공유플로우를 통해 메시지를 보내면 대기하고 잇는 모든 코루틴이 수신한다
+
+```kotlin
+suspend fun main(): Unit = coroutineScope {
+    val mutableSharedFlow =
+        MutableSharedFlow<String>(replay = 0)
+    // or MutableSharedFlow<String>()
+
+    launch {
+        mutableSharedFlow.collect {
+            println("#1 received $it")
+        }
+    }
+    launch {
+        mutableSharedFlow.collect {
+            println("#2 received $it")
+        }
+    }
+
+    delay(1000)
+    mutableSharedFlow.emit("Message1")
+    mutableSharedFlow.emit("Message2")
+}
+```
+
+* mutableSharedFlow를 종료할 방법이 없어서 전체 스코프를 취소하는 법밖에 없다.
+
+* 기본값이 0인 reply를 설정하면, 마지막으로 전송한 값들이 정해진 수만큼 저장된다
+
+* resetReplayCache를 사용하면 값을 저장한 캐시를 초기화할 수 있다.
+
+```kotlin
+suspend fun main(): Unit = coroutineScope {
+    val mutableSharedFlow = MutableSharedFlow<String>(
+        replay = 2,
+    )
+    mutableSharedFlow.emit("Message1")
+    mutableSharedFlow.emit("Message2")
+    mutableSharedFlow.emit("Message3")
+
+    println(mutableSharedFlow.replayCache)
+    // [Message2, Message3]
+
+    launch {
+        mutableSharedFlow.collect {
+            println("#1 received $it")
+        }
+        // #1 received Message2
+        // #1 received Message3
+    }
+
+    delay(100)
+    mutableSharedFlow.resetReplayCache()
+    println(mutableSharedFlow.replayCache) // []
+}
+```
+
+### shareIn
+
+플로우는 사용자 액션, 데이터베이스 변경, 새로운 메시지 등을 감지할때 주로 사용한다.
+
+다양한 클래스가 변화를 감지하는 상황에 하나의 플로우를 쓰고싶다면 shareFlow를 써야한다.
+
+```kotlin
+suspend fun main(): Unit = coroutineScope {
+    val flow = flowOf("A", "B", "C")
+        .onEach { delay(1000) }
+
+    val sharedFlow: SharedFlow<String> = flow.shareIn(
+        scope = this,
+        started = SharingStarted.Eagerly,
+        // replay = 0 (default)
+    )
+
+    delay(500)
+
+    launch {
+        sharedFlow.collect { println("#1 $it") }
+    }
+
+    delay(1000)
+
+    launch {
+        sharedFlow.collect { println("#2 $it") }
+    }
+
+    delay(1000)
+
+    launch {
+        sharedFlow.collect { println("#3 $it") }
+    }
+}
+
+```
+
+* started : 리스너 수에 따라 값을언제부터 감지할지 결정한다.
+* SharingStarted.Eagerly : 즉시 값을 감지 시작하고 플로우로 값 전송을 한다. 감지 시작 전 값이 나오면 일부 유실할수도 있다. 
+* SharingStarted.Lazily: 첫번째 구독자가 나올때 감지하기 시작한다. 모둔 구독자가 사라져도 플로우는 액티브 상태지만, 구독자가 없으면 replay 수 만큼 최근 값들만 캐싱한다. 
+* WhileSubscribed: 첫번째 구독자가 나올때 감지하기 시작하며, 마지막 구독자가 사라지면 플로우도 멈춘다. 새로운 구독자가 다시 나오면 다시 시작된다. 
+
+### 상태 플로우
+
+상태 플로우는 공유 플로우의 개념을 확장시킨것으로 replay 인자 값이 1인 공유 플로우와 비슷하게 작동한다.
+
+* `replay` 인자가 1인 **공유 플로우 (SharedFlow)**는 최신 값을 **구독자**가 구독할 때 **즉시 받을 수 있도록** 저장하는 **버퍼 기능**을 제공
+* `replay`가 `1`로 설정된 경우, 마지막으로 방출된 값 **1개**를 저장하고 있다가 **새로 구독한 구독자에게 즉시 제공**합니다. 이와 같은 특성 때문에 `replay`가 1로 설정된 `SharedFlow`는 **구독자가 나중에 연결되더라도 최신 값 1개를 받을 수 있는** 방식으로 동작합니다.
+
+```kotlin
+suspend fun main() = coroutineScope {
+    val state = MutableStateFlow("A")
+    println(state.value) // A
+    launch {
+        state.collect { println("Value changed to $it") }
+        // Value changed to A
+    }
+
+    delay(1000)
+    state.value = "B" // Value changed to B
+
+    delay(1000)
+    launch {
+        state.collect { println("and now it is $it") }
+        // and now it is B
+    }
+
+    delay(1000)
+    state.value = "C" // Value changed to C and now it is C
+}
+```
+
+상태플로우는 데이터가 덮어 씌워지기 때문에, 관찰이 느린 경우 상태의 중간 변화를 받을 수 없는 경우도 있습니다. 모든 이벤트를 다 받으려면 공유플로우 를 사용해야 합니다.
+
+
+
 ## 25장 플로우 테스트하기
+
+
+
+### 끝나지않는 플로우 테스트
+
+상태 플로우와 공유 플로우를 테스트하는건 복잡하다.
+
+1. 스코프를 필요로 한다. runTest 사용시 스코프는 this가 아닌 backgroundScope가 되므로 기다릴 수 없다.
+2. 무한정이기 때문에 스코프가 취소되지 않는 한 플로우도 완료되지 않는다.
+
+예시) 특정 사용자로부터 온 메시지를 감지한다.
+
+```kotlin 
+class MessagesService(
+    messagesSource: Flow<Message>,
+    scope: CoroutineScope
+) {
+    private val source = messagesSource
+        .shareIn(
+            scope = scope,
+            started = SharingStarted.WhileSubscribed()
+        )
+    
+    fun observeMessages(fromUserId: String) = source
+        .filter { it.fromUserId == fromUserId }
+}
+```
+
+backgroundScope에서 플로우를 시작하고, 플로우가 방출하는 모든 원소를 컬렉션에 저장한다.
+
+실패하는 경우 무엇인지 무엇이 되어야하는지에 대해 명확하게 보여줄뿐만아니라 테스트 시간을 유연하게 설정할 수 있다.
+
+```kotlin
+class MessagesServiceTest {
+    @Test
+    fun `should emit messages from user`() = runTest {
+        // given
+        val source = flowOf(
+            Message(fromUserId = "0", text = "A"),
+            Message(fromUserId = "1", text = "B"),
+            Message(fromUserId = "0", text = "C"),
+        )
+        val service = MessagesService(
+            messagesSource = source,
+            scope = backgroundScope,
+        )
+        
+        // when
+        val result = service.observeMessages("0")
+            .take(2)
+            .toList()
+        
+        // then
+        assertEquals(
+            listOf(
+                Message(fromUserId = "0", text = "A"),
+                Message(fromUserId = "0", text = "C"),
+            ), result
+        )
+    }
+}
+```
+
+
+
+### 연결 개수 정하기
+
+MessageService의 가장 중요한 기능 중 하나는 얼마나 많은 관찰자가 있든지 상관없이 단 하나의 연결만 시작해야 한다
+
+```kotlin
+// Starts at most one connection to the source
+class MessagesService(
+    messagesSource: Flow<Message>,
+    scope: CoroutineScope
+) {
+    private val source = messagesSource
+        .shareIn(
+            scope = scope,
+            started = SharingStarted.WhileSubscribed()
+        )
+    
+    fun observeMessages(fromUserId: String) = source
+        .filter { it.fromUserId == fromUserId }
+}
+
+// Can start multiple connections to the source
+class MessagesService(
+    messagesSource: Flow<Message>,
+) {
+    fun observeMessages(fromUserId: String) = messagesSource
+        .filter { it.fromUserId == fromUserId }
+}
+```
+
+실제 연결이 1개만 있는지 확인하는법은 구독자의 수를 세는 플로우를 만드는것. onStart시 1씩 증가시키고, onComplection할때 1씩 감소시키면 된다
+
+```kotlin
+private val infiniteFlow =
+    flow<Nothing> {
+        while (true) {
+            delay(100)
+        }
+    }
+
+class MessagesServiceTest {
+    // ...
+    
+    @Test
+    fun `should start at most one connection`() = runTest {
+        // given
+        var connectionsCounter = 0
+        val source = infiniteFlow
+            .onStart { connectionsCounter++ }
+            .onCompletion { connectionsCounter-- }
+        val service = MessagesService(
+            messagesSource = source,
+            scope = backgroundScope,
+        )
+        
+        // when
+        service.observeMessages("0")
+            .launchIn(backgroundScope)
+        service.observeMessages("1")
+            .launchIn(backgroundScope)
+        service.observeMessages("0")
+            .launchIn(backgroundScope)
+        service.observeMessages("2")
+            .launchIn(backgroundScope)
+        delay(1000)
+        
+        // then
+        assertEquals(1, connectionsCounter)
+    }
+}
+```
+
+
+
+
 
 # 4부 코틀린 코루틴 적용하기
 ## 26장 일반적인 사용 예제
+
+코루틴을 지원하는 않는 라이브러리를 사용해 콜백 함수를 반드시 사용해야 하는 경우라면
+
+suspendCancellableCoroutine을 사용해 콜백을 중단함수로 변환한다
+
+```kotlin
+suspend fun requestNews(): News {
+    return suspendCancellableCoroutine<News> { cont ->
+        val call = requestNewsApi { news ->
+            cont.resume(news)
+        }
+        cont.invokeOnCancellation {
+            call.cancel()
+        }
+    }
+}
+```
+
+Result로도 가능하다
+
+```kotlin
+suspend fun requestNews(): Result<News> {
+    return suspendCancellableCoroutine<News> { cont ->
+        val call = requestNewsApi(
+            onSuccess = { news -> 
+                cont.resume(Result.success(news))
+            },
+            onError = { e -> 
+                cont.resume(Result.failure(e)) 
+            }
+        )
+        cont.invokeOnCancellation {
+            call.cancel()
+        }
+    }
+}
+```
+
+### 블로킹 함수
+
+일반적인 suspend 함수에서는 블로킹함수르 ㄹ절대 호출해서는 안된다.
+
+스레드를 정밀하게 사용하기 때문이다.
+
+블로킹 함수 호출시 withContext를 사용해 디스패처를 명시하는것이 좋다
+
+```kotlin
+class DiscSaveRepository(
+    private val discReader: DiscReader
+) : SaveRepository {
+
+    override suspend fun loadSave(name: String): SaveData =
+        withContext(Dispatchers.IO) {
+            discReader.read("save/$name")
+        }
+}
+```
+
+
+
+websocket을 설정하고 메시지를 기다릴때는 Flow를 사용하는것이 맞다.
+
+서로 독립적인 작업 여러개를 동시에 시작하고 싶다면, supervisorScope를 사용하자
+
+
+
+
+
 ## 27장 코루틴 활용 비법
 ## 28장 다른 언어에서의 코루틴 사용법
 ## 29장 코루틴을 시작하는 것과 중단 함수 중 어떤 것이 나을까?
