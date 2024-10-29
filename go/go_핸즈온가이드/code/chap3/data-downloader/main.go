@@ -21,13 +21,10 @@ func main() {
 		fmt.Fprintf(os.Stdout, "Must specify a HTTP URL to get data from")
 		os.Exit(1)
 	}
-
 	body, err := fetchRemoteResource(os.Args[1])
-
 	if err != nil {
 		fmt.Fprintf(os.Stdout, "%v\n", err)
 		os.Exit(1)
 	}
-
 	fmt.Fprintf(os.Stdout, "%s\n", body)
 }
