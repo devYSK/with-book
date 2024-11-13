@@ -1,6 +1,0 @@
-
-b	java:S101"MRename this class name to match the regular expression '^[A-Z][a-zA-Z0-9]*$'.(Ìû†û
-o	java:S120"ZRename this package name to match the regular expression '^[a-z_]+(\.[a-z_][a-z0-9_]*)*$'.(È‚æá
-y
-java:S2142"^Either re-interrupt this method or rethrow the "InterruptedException" that can be caught here.(‚¦¡ûûÿÿÿÿ
-C	java:S108")Either remove or fill this block of code.(‚¦¡ûûÿÿÿÿ

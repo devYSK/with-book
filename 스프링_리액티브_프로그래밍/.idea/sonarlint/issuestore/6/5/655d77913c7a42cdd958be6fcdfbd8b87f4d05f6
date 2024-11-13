@@ -1,9 +1,0 @@
-
-{
-java:S1488,"`Immediately return this expression instead of assigning it to the temporary variable "dateTime".(é—€şÿÿÿÿ
-g	java:S101"MRename this class name to match the regular expression '^[A-Z][a-zA-Z0-9]*$'.(ıÊª±ùÿÿÿÿ
-n	java:S120"ZRename this package name to match the regular expression '^[a-z_]+(\.[a-z_][a-z0-9_]*)*$'.(ØÁÇj
-G
-java:S16021",Remove useless curly braces around statement(°‚˜§üÿÿÿÿ
-[
-java:S16121"@Replace this lambda with method reference 'System.out::println'.(°‚˜§üÿÿÿÿ

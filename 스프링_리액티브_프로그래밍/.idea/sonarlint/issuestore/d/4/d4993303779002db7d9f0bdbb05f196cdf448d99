@@ -1,5 +1,0 @@
-
-g	java:S101"MRename this class name to match the regular expression '^[A-Z][a-zA-Z0-9]*$'.(Œô£¾ýÿÿÿÿ
-t	java:S120"ZRename this package name to match the regular expression '^[a-z_]+(\.[a-z_][a-z0-9_]*)*$'.(¼³°…þÿÿÿÿ
-S
-java:S1612"=Replace this lambda with method reference 'MathFlux::sumInt'.(ƒ¶ÊÅ

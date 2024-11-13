@@ -1,59 +1,0 @@
-
-d
-java:S1192›"HDefine a constant instead of duplicating this literal "Tom-boy" 3 times.(îµÀŒúÿÿÿÿ
-h
-java:S1104U"RMake nppMap a static final constant or non-public and provide accessors if needed.(Êßº
-s
-java:S1104V"XMake morseCodeMap a static final constant or non-public and provide accessors if needed.(÷É‰èûÿÿÿÿ
-q
-java:S1104W"VMake morseCodes a static final constant or non-public and provide accessors if needed.(ÊÜÒìûÿÿÿÿ
-B
-java:S1444U",Make this "public static nppMap" field final(Êßº
-M
-java:S1444V"2Make this "public static morseCodeMap" field final(÷É‰èûÿÿÿÿ
-K
-java:S1444W"0Make this "public static morseCodes" field final(ÊÜÒìûÿÿÿÿ
-t	java:S120"ZRename this package name to match the regular expression '^[a-z_]+(\.[a-z_][a-z0-9_]*)*$'.(ƒåÙŸıÿÿÿÿ
-8
-java:S2386"Make this member "protected".(«Õ¡¶ûÿÿÿÿ
-2
-java:S2386"Make this member "protected".(Œ¤±u
-3
-java:S2386"Make this member "protected".(¶÷¨
-8
-java:S2386"Make this member "protected".(Ôê‚Şşÿÿÿÿ
-3
-java:S2386."Make this member "protected".(Ì¶
-2
-java:S23860"Make this member "protected".(âÖ‹
-3
-java:S23868"Make this member "protected".(ùáß‹
-8
-java:S2386>"Make this member "protected".(€Ã¹Ëıÿÿÿÿ
-3
-java:S2386D"Make this member "protected".(Ì¸Æ
-3
-java:S2386U"Make this member "protected".(Êßº
-8
-java:S2386V"Make this member "protected".(÷É‰èûÿÿÿÿ
-8
-java:S2386W"Make this member "protected".(ÊÜÒìûÿÿÿÿ
-3
-java:S2386w"Make this member "protected".(Ãˆ·Ü
-3
-java:S2386‚"Make this member "protected".(ºª
-9
-java:S2386"Make this member "protected".(êá¿úÿÿÿÿ
-4
-java:S2386˜"Make this member "protected".(Ï‹Ê«
-9
-java:S2386°"Make this member "protected".(ÿ¾¤ßüÿÿÿÿ
-P
-java:S1612L":Replace this lambda with method reference 'Tuple2::getT1'.(”ëğ
-P
-java:S1612R":Replace this lambda with method reference 'Tuple2::getT1'.(”ëğ
-p	java:S115¶"ZRename this constant name to match the regular expression '^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$'.(Ö÷”
-p	java:S115·"ZRename this constant name to match the regular expression '^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$'.(“ãìı
-u	java:S115¸"ZRename this constant name to match the regular expression '^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$'.(à¸³ûÿÿÿÿ
-u	java:S115¹"ZRename this constant name to match the regular expression '^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$'.(µüÈÅÿÿÿÿÿ
-p	java:S115º"ZRename this constant name to match the regular expression '^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$'.(¬¾ÿÖ
