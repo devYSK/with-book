@@ -1762,6 +1762,111 @@ volumes:
 
 ## 8.1 헬스 체크를 지원하는 도커 이미지 빌드하기
 
+도커는 컨테이너 실행할때마다 애플리케이션 상태를 확인하며, 지정한 프로세스의 실행 상태를 확인한다.
+
+만약 프로세스가 종료됐다면 컨테이너도 종료 상태가 되므로 이것으로 애플리케이션 자체의 헬스 체크가 가능하다.
+
+그러나 애플리케이션이 실행중이라는것이지 정상적인 상태라는것은 보장할 수 없다. 
+
+도커는 애플리케이션의 상태가 실제 정상인지 확인할 수 있는 정보를 도커 이미지에 직접 넣을 수 있는 기능을 제공한다.
+
+ockerfile에 `HEALTHCHECK` 지시자를 추가하여 헬스체크를 설정할 수 있다. 
+
+```dockerfile
+FROM diamol/dotnet-aspnet
+
+ENTRYPOINT ["dotnet", "/app/Numbers.Api.dll"]
+HEALTHCHECK CMD curl --fail http://localhost/health
+
+WORKDIR /app
+COPY --from=builder /out/ .
+```
+
+curl --fail은 요청 성공시 0 실패시 0아닌값을 반환하는데, 도커는 0을 헬스 체크 정상 0이외 값을 비정상으로 간주한다. 
+
+기본값은 30초 간격으로 연속 3회 이상 실패하면 애플리케이션이 이상 상태로 간주된다. 
+
+아래처럼도 가능하다
+
+```dockerfile
+# 기본 이미지
+FROM alpine:3.18
+
+# 애플리케이션 실행
+CMD ["sh", "-c", "sleep 3600"]
+
+# 헬스체크 설정
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:8080/health || exit 1
+  
+## 내부에서도 가능
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD sh -c "sleep 10 && curl -f http://localhost:8080/health || exit 1"
+```
+
+*  `--interval`: 헬스체크를 수행하는 간격 (기본값: `30s`)
+
+* `--timeout`: 헬스체크 명령어의 최대 실행 시간 (기본값: `30s`)
+
+* `--start-period`: 컨테이너 시작 후 헬스체크를 시작하기 전에 대기하는 시간 (기본값: `0s`)
+
+* `--retries`: 헬스체크가 실패로 간주되기 전 허용되는 재시도 횟수 (기본값: `3`)
+
+
+
+`docker-compose.yml` 파일에서도 헬스체크를 설정할 수 있다.
+
+```yaml
+version: '3.8'
+services:
+  web:
+    image: my-web-app
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+```
+
+* `test`: 헬스체크 명령어
+
+* `interval`: 헬스체크 간격
+
+* `timeout`: 헬스체크 타임아웃
+
+* `retries`: 실패 허용 재시도 횟수
+
+* `start_period`: 초기 시작 대기 시간
+
+
+
+헬스체크가 연속으로 실패하면 컨테이너의 상태는 **`unhealthy`**로 변경되지만 컨테이너는 종료되지 않고 계속 실행된다. 헬스체크는 모니터링하기 위한 용도이지 강제종료하거나재시작하는 기능이 아니기 때문이다
+
+Docker Compose나 Docker CLI에서 **`restart` 정책**을 설정하면, 헬스체크 실패 시 컨테이너를 자동으로 재시작하도록 구성할 수 있다.
+
+```
+version: '3.8'
+services:
+  web:
+    image: my-web-app
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: on-failure
+```
+
+- `on-failure` : 컨테이너가 비정상 종료하거나 헬스체크 실패 시 재시작.
+- `always` :어떤 이유로든 컨테이너가 종료되면 항상 재시작.
+- `unless-stopped` : 명시적으로 중지된 경우를 제외하고 항상 재시작.
+
 ## 8.2 디펜던시 체크가 적용된 컨테이너 실행하기
 
 ## 8.3 애플리케이션 체크를 위한 커스텀 유틸리티 만들기
