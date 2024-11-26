@@ -1871,13 +1871,193 @@ services:
 
 ## 8.3 애플리케이션 체크를 위한 커스텀 유틸리티 만들기
 
+curl이 컨테이너 상태 체크에 유용한 도구이기는 하지만 사용하지 않을 도구를 넣어봤짜 용량만 늘어나기 때문에
+
+실제 애플리케이션 체크에는 애플리케이션과 같은 언어로 구현된 별도의 커스텀 유틸리티를 사용하는것이 좋다
+
+장점.
+
+* 커스텀 유틸리티 실행시 애플리케이션과 같은 도구를 사용하므로 이미지에 추가 소프트웨어를 추가할 필요가 없음
+* 셸 스크립트로는 구현하기 어려운 로직을 적용할 수 있음
+
+애플리케이션 빌드, 유틸리티 빌드 로 나뉜 멀티 스테이지 빌드를 적용한 도커 파일이다
+
+```dockerfile
+FROM diamol/dotnet-sdk AS builder
+
+WORKDIR /src
+COPY src/Numbers.Api/Numbers.Api.csproj .
+RUN dotnet restore
+
+COPY src/Numbers.Api/ .
+RUN dotnet publish -c Release -o /out Numbers.Api.csproj
+
+# http check utility
+FROM diamol/dotnet-sdk AS http-check-builder
+
+WORKDIR /src
+COPY src/Utilities.HttpCheck/Utilities.HttpCheck.csproj .
+RUN dotnet restore
+
+COPY src/Utilities.HttpCheck/ .
+RUN dotnet publish -c Release -o /out Utilities.HttpCheck.csproj
+
+# app image
+FROM diamol/dotnet-aspnet
+
+ENTRYPOINT ["dotnet", "Numbers.Api.dll"]
+HEALTHCHECK CMD ["dotnet", "Utilities.HttpCheck.dll", "-u", "http://localhost/health"]
+
+WORKDIR /app
+COPY --from=http-check-builder /out/ .
+COPY --from=builder /out/ .
+```
+
+컨테이너의 상태를 확인하기 위해 주기적으로 실행되는 명령.
+
+여기서는 `Utilities.HttpCheck.dll`이 `/health` 엔드포인트를 호출하여 컨테이너의 상태를 확인.
+
 ## 8.4 도커 컴포즈에 헬스 체크와 디펜던시 체크 정의하기
 
-## 8.5 헬스 체크와 디펜던시 체크로 복원력 있는 애플리케이션을 만들 수 있는 이유
+도커 컴포즈에도 헬스 체크를 추가할 수 있다.
+
+그리고 도커 컴포즈는 새 컨테이너로 대채하진 않지만, 종료된 컨테이너를 재시작하거나 이미지에 정의되지 않은 헬스 체크를 추가할 수 있다. 
+
+```yaml
+version: "3.7"
+
+services:
+  numbers-api:
+    image: diamol/ch08-numbers-api:v3
+    ports:
+      - "8087:80"
+    healthcheck:
+      interval: 5s
+      timeout: 1s
+      retries: 2
+      start_period: 5s
+    networks:
+      - app-net
+
+  numbers-web:
+    image: diamol/ch08-numbers-web:v3
+    restart: on-failure
+    environment:
+      - RngApi__Url=http://numbers-api/rng
+    ports:
+      - "8088:80"
+    healthcheck:
+      test: ["CMD", "dotnet", "Utilities.HttpCheck.dll", "-t", "150"]
+      interval: 5s
+      timeout: 1s
+      retries: 2
+      start_period: 10s
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    external:
+      name: nat
+
+```
+
+* interval : 헬스 체크 실시 간격
+* timeout 응답 받지 못하면 실패로 간주하는 제한 시간
+* retries : 이상으로 간주할 때까지 필요한 연속 실패 횟수
+* start_period : 컨테이너 실행 후 첫 헬스 체크를 실시하는 시간 간격 
+
+restart: on-failure 설정이 있으므로, 컨테이너 종료시 컨테인너를 재시작 한다. 
 
 ## 8.6 연습 문제
 
+애플리케이션은 인위적인 메모리 누수를 일으킨다. nodejs로 구현되어 있다.
+
+
+
+• 애플리케이션 시작 시 충분한 메모리가 있는지 확인하고, 메모리가 부족한 경우 컨테이너를 종료한다.
+
+• 애플리케이션 실행 중 5초 간격으로 최대치를 초과해 메모리를 사용하는지 확인한다. 최대 치를 초과했다면 해당 컨테이너의 상태를 이상으로 판정해야 한다.
+
+• 테스트 로직은 memory-check.js 스크립트에 이미 작성돼 있다. Dockerfile 스크립트에 서 테스트 스크립트를 그대로 사용하면 된다.
+
+• 테스트 스크립트와 Dockerfile 스크립트는 ch08/Iab 디렉터리에 있다.
+
+```javascript
+const fs = require("fs");
+
+if (!fs.existsSync("ALLOCATED_MB")) {
+  console.log("Memory check: OK, none allocated.");
+  process.exit(0);
+}
+
+const max = process.env.MAX_ALLOCATION_MB;
+const allocated = parseInt(fs.readFileSync("ALLOCATED_MB", "utf-8"));
+
+if (max >= allocated) {
+  console.log(`Memory check: OK, allocated: ${allocated}MB, max: ${max}MB`);
+  process.exit(0);
+} else {
+  console.log(`Memory check: FAIL, allocated: ${allocated}MB, max: ${max}MB`);
+  process.exit(1);
+}
+
+-- memory-hog.js
+const fs = require("fs");
+
+function allocate() {
+  const toAllocate = 1024 * 1024 * process.env.LOOP_ALLOCATION_MB;
+
+  /* this allocates a large chunk of memory, but in this app we're just going to pretend
+  var buffers = new Array();
+  for (i = 0; i <= loop; i++) {
+    buffers.push(Buffer.alloc(toAllocate));
+  }
+  */
+
+  var allocatedMb = process.env.LOOP_ALLOCATION_MB * loop;
+  console.log(`Allocated: ${allocatedMb}MB`);
+  fs.writeFileSync("ALLOCATED_MB", allocatedMb, "utf-8");
+
+  loop++;
+  setTimeout(allocate, process.env.LOOP_INTERVAL_MS);
+}
+
+var loop = 1;
+allocate();
+```
+
+```dockerfile
+# Node.js 기반 이미지 사용
+FROM diamol/node
+
+# 환경 변수 설정
+ENV MAX_ALLOCATION_MB=4096 \
+    LOOP_ALLOCATION_MB=512 \
+    LOOP_INTERVAL_MS=2000
+
+WORKDIR /app
+
+COPY src/ .
+
+# 애플리케이션 실행 및 메모리 검사
+CMD node memory-check.js && \
+    node memory-hog.js
+
+# 컨테이너 상태 확인을 위한 HEALTHCHECK 추가
+HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=3 \
+ CMD node memory-check.js
+```
+
+
+
+
+
 # 9장 컨테이너 모니터링으로 투명성 있는 애플리케이션 만들기
+
+옵저버빌리티(투명성 이라고 표현하는데 보통 관측하다 라는 의미)은 매우 중요한 요소이다.
+
+그라파나와 프로메테우스를 사용해 애플리케이션 컨테이너에서 측정된 수치를 수집하고 그라파나를 사용해 시각화 할 수 있다. 
 
 ## 9.1 컨테이너화된 애플리케이션에서 사용되는 모니터링 기술 스택
 
