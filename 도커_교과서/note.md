@@ -2057,33 +2057,495 @@ HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=3 \
 
 옵저버빌리티(투명성 이라고 표현하는데 보통 관측하다 라는 의미)은 매우 중요한 요소이다.
 
-그라파나와 프로메테우스를 사용해 애플리케이션 컨테이너에서 측정된 수치를 수집하고 그라파나를 사용해 시각화 할 수 있다. 
+그라파나와 프로메테우스를 사용해 애플리케이션 컨테이너에서 측정된 수치를 수집하고 그라파나를 사용해 시각화 할 수 있다. (프로메테우스는 스케일 아웃이 안된다. 때문에 미미르라는 새로운 수집 도구가 나왔다.)
+
+도커 엔진의 측정값도 추출할 수 있다.
+
+도커 엔진의 설정은 daemon.json이라는 이름이 파일에 포함되어있는데, 이 파일에서 설정 파일을 열어 수정하면 된다
+
+```
+mac은
+1. Docker Desktop 열기.
+2. Settings (설정) → Docker Engine 선택.
+3. JSON 형식으로 도커 엔진 설정 편집 가능.
+
+리눅스는
+보통 /etc/docker 아래에 있는데, 없으면 생성해서 쓰면 됌 
+```
+
+설정 파일을 열고 다음 두 값을 추가하면 9323 포트를 통해 측정 값이 공개된다
+
+```
+"metrics-addr" : "0.0.0.0:9323",
+"experimental" : true
+```
+
+```
+curl http://localhost:9323
+```
+
+출력 포맷은 프로메테우스 포맷이다. 상태 정보가 이름 값 쌍 형태로 표현된다.
 
 ## 9.1 컨테이너화된 애플리케이션에서 사용되는 모니터링 기술 스택
 
 ## 9.2 애플리케이션의 측정값 출력하기
 
+프로메테우스는 http 폴링으로 애플리케이션의 상태정보를 수집한다.
+
+그래서 각 언어마다 보통 라이브러리를 지원한다
+
+* java - micrometer 
+* go : promhttp
+* nodejs : prom-client
+
+프로메테우스 클라이언트 라이브러리를 이용하면 자동으로 측정해주며, 수집된 정보는 런타임 수준의 측정값이다.
+
+도커 엔진에서 얻은 측정값과는 또 다른 수준의 정보이며 상당한 로우한 정보까지도 얻을 수 있다. 
+
+어떤 값을 수집할지는 보통 아래의 기준으로 한다.
+
+**애플리케이션 성능 관련 메트릭**
+
+- **요청 처리 시간(latency)**: 각 요청이나 작업의 평균, 최소, 최대, 그리고 95/99퍼센타일 응답 시간.
+- **애플리케이션 스루풋(throughput)**: 초당 처리되는 요청 수.
+- **에러율(error rate)**: 실패한 요청의 비율 (HTTP 5xx, 비정상 상태 코드 등).
+- **큐 대기 시간**: 작업 큐에서 대기하는 시간 (있다면).
+
+**리소스 사용량**
+
+- **CPU 사용량**: 전체 및 개별 코어의 사용률.
+- **메모리 사용량**: 애플리케이션 메모리 사용량, GC(Garbage Collection) 횟수 및 지연 시간.
+- **디스크 사용량 및 I/O**: 읽기/쓰기 속도, 디스크 사용률.
+- **네트워크 사용량**: 송/수신된 데이터 양, 대역폭 사용률.
+
+**데이터베이스 메트릭**
+
+- **쿼리 성능**: 각 쿼리의 응답 시간 및 실패율.
+- **연결 수(pool usage)**: 데이터베이스 연결 풀 사용량.
+- **캐시 히트율**: 캐시된 데이터의 활용도 (e.g., Redis, Memcached).
+- **슬로우 쿼리 로그**: 지연된 쿼리 정보.
+
+**애플리케이션 상태**
+
+- **스레드 수**: 실행 중인 스레드 및 스레드 풀 상태.
+- **에러 및 예외 발생 빈도**: 애플리케이션의 주요 예외 및 로그 기반 에러 분석.
+- **상태 전이 이벤트**: 애플리케이션의 상태 전환, 서비스 시작/종료.
+
+**사용자 행동 관련 메트릭**
+
+- **유입 경로 및 트래픽 패턴**: 사용자 활동 경로 분석.
+- **사용자 세션 수**: 활성 세션, 세션 지속 시간.
+- **기기/브라우저 정보**: 사용자가 애플리케이션에 접속한 기기 및 환경 정보.
+
+**컨테이너 및 클라우드 환경 메트릭** (만약 사용 중이라면)
+
+- **컨테이너 리소스 사용량**: CPU, 메모리, 네트워크 및 디스크 I/O.
+- **오토스케일링 이벤트**: 인스턴스 추가/제거 로그.
+- **노드 상태**: 클러스터 내 노드의 상태 (Ready/NotReady 등).
+
+**보안 및 접근 메트릭**
+
+- **인증 및 권한 요청 수**: 성공, 실패한 인증 시도.
+- **비정상적인 접근 시도**: 특정 IP, 사용자, 시간대에 집중된 비정상적 트래픽.
+
+**비즈니스 관련 메트릭**
+
+- **거래/트랜잭션 성공률**: 주문, 결제 등 주요 트랜잭션의 성공/실패 비율.
+- **매출 또는 사용자 행동 분석**: 특정 이벤트 발생 빈도 (예: 구매 완료, 장바구니 추가).
+- **사용자 참여도**: 페이지뷰, 클릭수, 평균 체류 시간.
+
+**경보 및 이상 탐지 메트릭**
+
+- **임계값 초과**: 특정 임계값을 초과한 이벤트 수집 (e.g., CPU 90% 초과).
+- **이상 징후 탐지**: 일반적인 패턴에서 벗어난 메트릭의 이상 징후.
+
+
+
 ## 9.3 측정값 수집을 맡을 프로메테우스 컨테이너 실행하기
+
+prometheus_config.yml에서 어떤 애플리케이션을 수집할지 지정할 수 있따.
+
+```yaml
+global:
+  scrape_interval: 10s
+
+scrape_configs:
+  - job_name: "image-gallery"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["image-gallery"]
+
+  - job_name: "iotd-api"
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["iotd"]
+
+  - job_name: "access-log"
+    metrics_path: /metrics
+    scrape_interval: 3s
+    dns_sd_configs:
+      - names:
+          - accesslog
+        type: A
+        port: 80
+        
+  - job_name: "docker"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["DOCKER_HOST:9323"]
+
+```
+
+프로메테우스  컨테이너 실행시 해당 파일을 설정 파일로 지정해주면 된다.
+
+```yaml 
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: always
+    network_mode: host
+    user: root  # 명시적으로 루트 유저로 실행
+    privileged: true
+    ports:
+      - "9090:9090"  # Prometheus 웹 UI 포트
+    volumes:
+      - "./prometheus.yml:/etc/prometheus/prometheus.yml" # 볼륨 파일 지정 
+      - "./data/prometheus:/prometheus"  # TSDB 데이터 저장
+
+    command:
+      - '--storage.tsdb.path=/prometheus'               # 데이터베이스 경로
+      - '--storage.tsdb.wal-compression'                      # WAL 파일 압축을 활성화합니다.
+      - '--web.enable-lifecycle'
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=120d' # 데이터 보존 기간 설정
+      - --enable-feature=exemplar-storage
+      - --enable-feature=otlp-write-receiver
+
+    extra_hosts: ['host.docker.internal:host-gateway']
+    environment:
+      - TZ=Asia/Seoul  # 시간대 설정
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+        compress: "true"  # 압축 활성화
+```
+
+
 
 ## 9.4 측정값 시각화를 위한 그라파나 컨테이너 실행하기
 
+프로메테우스를 통해 데이터를 수집했다면, 시각화 시키는것은 그라파나가 맡을 수 있다.
+
+그라파나 대시보드는 쿼리를 커스텀하여 다양한 프로메테우스 수집 데이터들을 시각화하여 그래프, 테이블, 로우 등 다양하게 만들 수 있다. 
+
+보통 프로메테우스와 그라파나를 묶어 같이 이용한다
+
+```yaml
+version: "3.7"
+
+services:
+
+  prometheus:
+    image: diamol/ch09-prometheus
+    ports:
+      - "9090:9090"
+    environment:
+      - DOCKER_HOST=${HOST_IP}
+    networks:
+      - app-net
+
+  grafana:
+    image: diamol/ch09-grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    external:
+      name: nat
+
+```
+
+
+
 ## 9.5 투명성의 수준
 
-## 9.6 연습 문제
+observability, 프로덕트가 실제 서비스가 가능한 수준이 되려면 반드시 관측을 할 수 있어야 한다.
+
+가장 중요한 것은 애플리케이션의 전체 상황을 조망하는 대시보드다. 측정값 중에서 가장 애플리 케이션에 중요한 데이터를 모아 하나의 화면으로 구성할 수 있어야 한다. 그래야만 한눈에 이상 상황을 파악하고 사태가 악화되기 전에 과감한 조치를 취할 수 있다. 또한, 그라파나와 프로메테우스는 특정 임계치 값이 넘어가면 알림을 보낼 수 있기도 하다. 
 
 # 10장 도커 컴포즈를 이용한 여러 환경 구성
 
 ## 10.1 도커 컴포즈로 여러 개의 애플리케이션 배포하기
 
+도커 컴포즈는 여러개의 컨테이너로 구성된 애플리케이션을 단일 도커 엔진 호스트에서 실행하기 위한 도구이며 개발자에게 특히 유용하므로 개발 환경이나 테스트 환경에서 쓰인다. 여러 환경 구성 사용시 주의해야할점은 같은 포트를 통해 요청을 받게 하거나 서버에 호스트에 있는 파일을 여러 컨테이너가 쓰려고 해서는 안된다. 
+
+컴포즈가 사용하는 프로젝트 이름의 기본값을 바꿀 수 있어서 프로젝트 이름을 바꾸는 방법으로 단일 도커 호스트에 같은 애플리케이션을 여러번 실ㄹ행시킬 수 있다.
+
+```
+docker-compose -f docker-compose.yml -p todo-test up -d 
+```
+
+* todo-test가 프로젝트 이름. 이것만 바꾸면 무작위로 여러벌 실행 가능.
+
+이 정도로도 충분히 유용하지만 약간 아쉬운 점이 있다. 무작위로 정해진 공개 포트를 일일이 찾아야 하는 것 은 운영 팀에게나 테스트 팀에게나 바람직한 일이 아니다. 컴포즈 파일을 복사해 필요한 부분만 수정하는 방법도 가능하겠지만, 컴포즈가 제공하는 기능 중에 더 좋은 방법이 있다. 설정을 오버 라이드 할 수 있다. 
+
 ## 10.2 도커 컴포즈의 오버라이드 파일
+
+도커 컴포즈는 여러 파일을 합쳐 컴포즈 파일을 구성하는데, 나중에 지정된 파일의 내용이 이전 파일의 내용을 덮어쓰기 할 수 있다. 
+
+먼저, 기본 애플리케이션 구조와 모든 환경에서 공통으로 쓰이는 속성이 정의된 docker-compose.yml 파일이 있고,
+
+환경별로 달라진 속성을 정의할 수 있다.
+
+![image-20241128022729598](./images//image-20241128022729598.png)
+
+어떻게 오버라이드 하냐고? 하나 이상의 파일이 인자로 지정돼면 이들 파일을 병합한다.
+
+```
+docker-compose -f ./docker-compose.yml -f ./docker-compose-v2.yml config
+```
+
+* config 명령은 병합 후 유효한 파일일때만 최종 출력된다. 실행시키지는 않는다 
+
+병합 파일 순서는 인자로 받은 순서를 따르며 먼저인 파일이 나중인 파일보다 우선한다. 그러므로 순서를 중요시 해야한다. 
 
 ## 10.3 환경 변수와 비밀값을 이용해 설정 주입하기
 
+도커 컴포즈를 이용해 환경 변수를 주입할 수 있다. 
+
+비밀 값도 주입할 수 있다.
+
+```
+version: "3.7"
+
+services:
+  todo-web:
+    image: diamol/ch06-todo-list
+    secrets:
+      - source: todo-db-connection
+        target: /app/config/secrets.json
+
+
+-- /app/config/secrets.json
+{
+    "ConnectionStrings": {
+      "ToDoDb": "Server=todo-db;Database=todo;User Id=postgres;Password=postgres;"
+    }
+}
+```
+
+* source는 컨테이너 런타임이 비밀값을 읽ㅇ오는 위치
+* target은 컨테이너 안에 비밀값이 위치할 경로이다
+
+환경변수는 아래처럼 넣는다.
+
+```yaml
+version: "3.7"
+
+services:
+  todo-web:
+    ports:
+      - "${TODO_WEB_PORT}:80"
+    environment:
+      - Database:Provider=Postgres
+    env_file:
+      - ./config/logging.information.env
+    networks:
+      - app-net
+
+  todo-db:
+    image: diamol/postgres:11.5
+    ports:
+      - "${TODO_DB_PORT}:5432"
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    name: todo-test
+
+secrets:
+  todo-db-connection:
+    file: ./config/secrets.json
+```
+
+* environment 프로퍼티는 컨테이너 안에서만 사용되는 환경변수를 넣는다.
+* env_file 프로퍼티는 텍스트 파일의 경로를 받아서 해당 텍스트 파일에 정의된 환경 변수가 컨테이너에 적용된다 
+  * 내부적으로 키=값 형태로 한줄에 하나씩 넣는다
+* ${TODO_DB_PORT}는 호스트 컴퓨터의 환경변수 값으로 치환되어 들어간다.
+  * 만약 ${TODO_DB_PORT}가 5432면 5432:5432가 되는것이다 
+
 ## 10.4 확장 필드로 중복 제거하기
+
+서비스간 많은 설정값을 공유하는 컴포즈 파일이 덩치가 점점 커질 수도 있는 문제가 있다. 
+
+이 문제를 해결하기 위해선, YAML의 여러 블록을 한곳에서 정의하는 확장 필드를 이용할 수 있다. 
+
+컴포즈 파일 전체 스크립트에 걸쳐 이블록을 재사용하는 효과를 얻을 수 있다. 
+
+```yaml
+version: "3.7"
+
+x-labels: &logging
+  logging:  
+    options:
+      max-size: '100m'
+      max-file: '10'
+
+x-labels: &labels
+  app-name: image-gallery
+
+services:
+  accesslog:
+    <<: *logging
+    labels:
+      <<: *labels
+
+  iotd:
+    ports:
+      - 8080:80
+    <<: *logging
+    labels:
+      <<: *labels
+      public: api
+
+  image-gallery:
+    ports:
+      - 80:80
+    <<: *logging
+    labels:
+      <<: *labels
+      public: web
+
+  prometheus:
+    image: diamol/ch09-prometheus
+    ports:
+      - "9090:9090"
+    environment:
+      - DOCKER_HOST=${HOST_IP}
+    networks:
+      - app-net
+    <<: *logging
+    labels:
+      <<: *labels
+
+networks:
+  app-net:
+      name: image-gallery-prod
+```
+
+확장 필드는 사용자 정의 필드이며, logging과 lables라는 두개의 확장 필드가 있다.
+
+블록은 관습적으로 x로 시작하는 이름을 붙인다. 확장 필드 재사용시 YAML 병합 문법인 <<:*필드명 과 같이 쓴다.
+
+해당 위치에 x-lables: &logging의 값인 logging:... 값이 들어가는 것이다. 
+
+
 
 ## 10.5 도커를 이용한 설정 워크플로 이해하기
 
+지금까지 도커 컴포즈를 봤을때, 환경간 설정 차이를 정의하는 법과 관리하는 법을 배웠다.
+
+1. 애플리케이션 구성 요소의 조합 : 오버라이드 파일을 이용해서 공통 서비스는 두고 환경마다 필요한 서비스만 설정함
+2. 컨테이너 설정 : 포트 충돌, 볼륨 설정 등을 설정했다. 각 다르게 해서 여러 애플리케이션을 실행 가능하다 
+3. 애플리케이션 설정 : 컨테이너별로 내부 동작이 다르도록 환경 변수, 비밀 값 등을 다르게 설정할 수 있다. 
+
 ## 10.6 연습 문제
+
+개발 환경과 테스트 환경을 하나의 호스트 컴퓨터에서 실행한다.
+
+그리고 개발 환경을 docker-compose up 명령의 기본값으로 삼으며 다음과 같이 설정한다.
+
+- ﻿﻿로컬 파일 데이터베이스 사용
+- ﻿﻿8089번 포트 공개
+- ﻿﻿to-do 애플리케이션의 v2 버전 실행
+
+테스트 환경은 프로젝트 이름과 특정 컴포즈 파일을 지정해 실행하도록 하며, 다음과 같이 설정 한다.
+
+- ﻿﻿별도의 데이터베이스 컨테이너 사용
+- ﻿﻿데이터베이스 스토리지를 위한 볼륨 사용
+- ﻿﻿8080번 포트 공개
+- ﻿﻿to-do 애플리케이션의 최신(latest) 버전 실행
+
+```yaml
+# 베이스파일
+version: "3.7"
+
+services:
+  todo-web:
+    image: diamol/ch06-todo-list
+    secrets:
+      - source: todo-db-connection
+        target: /app/config/secrets.json
+
+# 개발 환경
+version: "3.7"
+
+services:
+  todo-web:
+    image: diamol/ch06-todo-list:v2
+    ports:
+      - 8089:80
+    environment:
+      - Database:Provider=Sqlite
+
+secrets:
+  todo-db-connection:
+    file: empty.json
+
+# 테스트 환경
+version: "3.7"
+
+services:
+  todo-web:
+    ports:
+      - "8080:80"
+    environment:
+      - Database:Provider=Postgres
+    networks:
+      - app-net
+
+  todo-db:
+    image: diamol/postgres:11.5
+    environment:
+      - PGDATA=/data
+    ports:
+      - "5433:5432"
+    volumes:
+      - "todo-database:/data"
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    name: todo-test
+
+secrets:
+  todo-db-connection:
+    file: postgres-connection.json
+
+volumes:
+  todo-database: # 디비 스토리지 사용을 위한 볼륨
+  
+# 실행 명령어는?
+개발시 : docker-compose up -d (기본값으로 삼음 )
+
+테스트시 : 
+
+docker-compose -f .\docker-compose.yml -f .\docker-compose-test.yml -p good up -d
+```
+
+
+
+
 
 # 11장 도커와 도커 컴포즈를 이용한 애플리케이션 빌드 및 테스트
 
