@@ -2770,17 +2770,334 @@ docker service create --detach --network numbers --name numbers-web --publish 80
 
 # 13장 도커 스웜 스택으로 분산 애플리케이션 배포하기
 
+실무에선 명령행 도구를 사용하지 않고, yaml 파일로 정의해 매니저 노드에 이 파일을 전달하는 방법을 쓴다
+
+yaml 파일에 애플리케이션의 원하는 상태를 기술하고 오케스트레이션 도구가 애플리케이션의 현재 상태를 파악해 원하는 상태로 만들기 위한 조치를 자동으로 취한다.
+
 ## 13.1 도커 컴포즈를 사용한 운영 환경
+
+도커 컴포즈는 도커 스웜 환경에서 동일한 파일 포맷을 사용할 수 있다. 스웜에서 가장 간단한 형태의 배포는 컴포즈 파일 그 자체다. 
+
+다음 예시는 docker-compose에서 deploy 프로퍼티를 추가해, 레플리카의 개수를 여러되로 늘리되 레플리카의 사용량을 제한한 예시이다
+
+```yaml
+version: "3.7"
+
+services:
+  todo-web:
+    image: diamol/ch06-todo-list
+    ports:
+      - 8080:80
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          cpus: "0.50" # 코어 한개의 50% 
+          memory: 100M # 메모리 경우 최대 100 MB 까지 점유 
+
+```
+
+기존 스택의 정의를 수정한 컴포즈 파일을 배포하려면
+
+```
+docker statck deploy -c ./todo-list/v2.yml todo 
+```
+
+
+
+
 
 ## 13.2 컨피그 객체를 이용한 설정값 관리
 
+클러스터에 도커 config 객체를 이용해 애플리케이션에 설정 값을 제공할 수 있다.
+
+![image-20241208175823645](./images//image-20241208175823645.png)
+
+객체의 이름과 설정값이 담긴 파일 경로를 지정하면 config 객체를 만들 수 있따.
+
+* JSON, XML, key=value 쌍, 바이너리 파일 형식
+
+```
+docker config create todo-list-config ./todo-list/configs/config.json
+
+docker config ls
+
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft": "Warning",
+      "Microsoft.Hosting.Lifetime": "Warning"
+    }
+  },
+  "AllowedHosts": "*",
+  "Database": {
+    "Provider": "Postgres"
+  }
+}
+```
+
+클러스터에 이 로컬 설정 파일을 전달할 수 있다. 
+
+서비스는 컴포즈 파일에 지정된 컨피그 객체를 사용할 수 있따.
+
+```
+version: "3.7"
+
+services:
+  todo-web:
+    image: diamol/ch06-todo-list
+    ports:
+      - 8080:80
+    configs:
+      - source: todo-list-config
+        target: /app/config/config.json
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 100M
+    networks:
+      - app-net
+
+  todo-db:
+    image: diamol/postgres:11.5
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 500M
+    networks:
+      - app-net
+
+configs:
+  todo-list-config:
+    external: true
+
+networks:
+  app-net:
+```
+
+
+
+그러나 config 객체 자체는 민감한 데이터를 보관하기 위한 수단이 아니며 파일 내용은 암호화 되지 않는다. 
+
 ## 13.3 비밀값을 이용한 대외비 설정 정보 관리하기
+
+비밀값은 클러스터의 관리를 받는 스웜 리소스다. 로컬로부터 파일 생성 후 클러스터 DB에 저장했다가 서비스 정의시 비밀값을 참조하면 비밀값이 전달된다. 이 비밀값은 항상 암호화된 상태로 존재하지만 해당 비밀값을 사용하는 컨테이너를 실행한 노드에서는 볼 수 있다.
+
+```
+docker secret create todo-list-secret ./todo-listsecrets/secrets.json
+
+docker secret inspect --pretty todo-list-secret
+```
+
+이렇게 설정된 비밀값을 컴포즈에 정의하여 참조할 수 있다.
+
+```yaml
+version: "3.7"
+
+services:
+  todo-web:
+    image: diamol/ch06-todo-list
+    ports:
+      - 8080:80
+    configs:
+      - source: todo-list-config
+        target: /app/config/config.json
+    secrets:
+      - source: todo-list-secret
+        target: /app/config/secrets.json
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 100M
+    networks:
+      - app-net
+
+  todo-db:
+    image: diamol/postgres:11.5
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 500M
+    networks:
+      - app-net
+
+configs:
+  todo-list-config:
+    external: true
+
+secrets:
+  todo-list-secret:
+    external: true
+
+networks:
+  app-net:
+```
+
+클러스터에서 컨피그 객체와 비밀값을 만들고 나면 이들의 내용은 변하지 않는다.
+
+수정하려면 새로운 컨피그 객체나 비밀값을 만들어야 한다.
+
+* 변경된 내용을 담은 새로운 컨피그 객체 혹은 비밀값을 기존 것과 다른 이름으로 만든다
+* 컴포즈 파일의 정의에 사용된 컨피그 객체 혹은 비밀값의 이름을 새로 만든 이름으로 바꾼다
+* 변경된 컴포즈 파일을 스택으로 배포한다. 
+
+즉 위의 단계를 따라 서비스를 업데이트 하여 컨테이너를 새 컨테이너로 교체해야 한다. 
 
 ## 13.4 스웜에서 볼륨 사용하기
 
+볼륨은 컨테이너와 별개의 생애주기를 갖는 스토리지의 단위이다. 
+
+컨테이너 파일 시스템 일부처럼 사용하지만, 컨테이너 외부에 존재하는 리소스다. 
+
+오케스트레이션 환경도 볼륨의 개념은 같다. 컴포즈 파일의 서비스 정의에 볼륨 마운트를 정의하면 레플리카에서 볼륨을 로컬 파일 시스템 디렉터리처럼 사용할 수 있다. 
+
+컨테이너를 새로 시작하면 기존 컨테이너의 볼륨에 연결되지만, 새로운 레플리카가 이전 레플리카와 다른 노드에서 실행되면 기존 볼륨을 사용할 수 없다. 이 문제는 서비스가 특정 노드에서만 실행되게 노드에 레이블을 부여하고 컴포즈 파일에서 해당 노드에서만 실행하도록 강제하면 된다
+
+```
+# 노드의 식별자를 찾아 해당 노드에 레이블을 부여한다
+docker node update --label-add storage=raid $(docker node ls -q)
+```
+
+```yaml
+version: "3.7"
+
+services:
+  todo-web:
+    image: diamol/ch06-todo-list
+    ports:
+      - 8080:80
+    configs:
+      - source: todo-list-config
+        target: /app/config/config.json
+    secrets:
+      - source: todo-list-secret
+        target: /app/config/secrets.json
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 100M
+    networks:
+      - app-net
+
+  todo-db:
+    image: diamol/postgres:11.5
+    environment:
+      PGDATA: "/var/lib/postgresql/data/pgdata"
+    volumes:
+      - todo-db-data:/var/lib/postgresql/data
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 500M
+      placement: # 노드 라벨 
+        constraints:
+          - node.labels.storage == raid
+    networks:
+      - app-net
+
+configs:
+  todo-list-config:
+    external: true
+
+secrets:
+  todo-list-secret:
+    external: true
+
+networks:
+  app-net:
+
+volumes:
+  todo-db-data:
+
+```
+
+
+
 ## 13.5 클러스터는 스택을 어떻게 관리하는가?
 
+도커스웜에서 스택은 클러스터가 관리를 담당하는 리소스의 모임이다. 
+
+![image-20241208182906657](./images//image-20241208182906657.png)
+
+- ﻿﻿스원도 볼륨을 생성하고 삭제할 수 있다. 서비스 이미지에 볼륨의 정의가 포함된 경우 스택 도 기본 볼륨을 생성하지만, 기본 볼륨은 스택을 제거하면 함께 제거된다. 스택 정의에 이름 이 붙은 볼륨을 사용하면 스택 배포와 함께 볼륨이 생성되지만, 이 볼륨은 스택을 제거해도 삭제되지 않는다.
+- ﻿﻿비밀값과 컨피그 객체는 설정값이 든 파일을 클러스터에 업로드하는 방법으로 생성한다. 비 밀값과 컨피그 객체는 클러스터 데이터베이스에 저장됐다가 이 비밀값이나 컨피그 객체를 사용하는 컨테이너가 실행될 때 해당 컨테이너로 전달된다. 비밀값과 컨피그 객체는 전형적 인 읽기 위주 객체로, 수정이 불가능하다. 스 환경에서 애플리케이션 설정 관리는 배포 프 로세스와 별개다.
+- ﻿﻿네트워크는 애플리케이션과 별도로 관리된다. 관리자가 명시적으로 네트워크를 생성할 수 도 있고 필요할 때마다 스원이 네트워크를 생성하기도 한다. 모든 스택은 컴포즈 파일에 네 트워크가 정의되지 않았더라도 자신이 포함한 서비스를 연결할 네트워크와 함께 배포된다.
+- ﻿﻿서비스는 스택이 배포될 때 생성되거나 제거된다. 서비스가 실행 중일 때는 스웜이 서비스 를 모니터링하며 서비스 수준이 정상치를 유지하는지 확인한다. 헬스 체크를 통해 이상이 검출된 컨테이너는 새로운 컨테이너로 교체되며, 고장을 일으킨 노드에서 실행 중이던 컨테 이너도 마찬가지로 교체된다.
+
+
+
 ## 13.6 연습 문제
+
+9장에서 살펴본 오늘의 천문 사진 애플리케이션을 운영 환경에 배포할 수 있는 컴포즈 파 일을 작성하라. 단일 파일로 된 컴포즈 파일로 다음 조건을 만족하면 된다.
+
+- ﻿﻿로그 API는 diamol/chog-access-log 이미지를 사용한다. 로그 API는 웹 애플리케이션에서 만 접근하는 내부용 컴포넌트이며, 세 개의 레플리카로 실행된다.
+- ﻿﻿NASA API는 diamol/chog-image-of-the-day 이미지를 사용한다. 8088번 포트를 통해 외 부 접근이 가능해야 하며, 사용량 증가에 대비해 다섯 개의 레플리카로 실행된다.
+- ﻿﻿웹 애플리케이션은 diamol/chog-image-gallery 이미지를 사용한다. HTTP 표준 포트인 80 번 포트를 통해 외부 접근이 가능해야 하며, 두 개의 레플리카로 실행된다.
+- ﻿﻿모든 컴포넌트는 적정한 수준으로 CPU 및 메모리 사용량이 제한돼야 한다(안전한 수치를 정하기 위해 시행착오를 통해 여러 번의 배포를 거쳐야 할 수도 있다).
+- ﻿﻿스택이 완전히 배포된 후 애플리케이션이 정상적으로 동작해야 한다.
+
+```
+version: "3.7"
+
+services:
+  accesslog:
+    image: diamol/ch09-access-log
+    deploy:
+      replicas: 3 # 3개 레플리카 
+      resources:
+        limits: # cpu 메모리 제한 
+          cpus: "0.50"
+          memory: 100M
+    networks:
+      - app-net
+
+  iotd:
+    image: diamol/ch09-image-of-the-day
+    ports:
+      - 8088:80
+    deploy:
+      replicas: 5 # 5개 레플리카 
+      resources:
+        limits:
+          cpus: "1"
+          memory: 200M
+    networks:
+      - app-net
+
+  image-gallery:
+    image: diamol/ch09-image-gallery
+    ports:
+      - 80:80
+    deploy:
+      replicas: 2
+      resources: # 2개 레플리카 
+        limits:
+          cpus: "0.75"
+          memory: 75M
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    name: image-gallery-prod
+```
+
+
+
+
 
 # 14장 업그레이드와 롤백을 이용한 업데이트 자동화
 
