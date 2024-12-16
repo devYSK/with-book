@@ -3101,63 +3101,512 @@ networks:
 
 # 14장 업그레이드와 롤백을 이용한 업데이트 자동화
 
+컨테이너 애플리케이션을 오케스트레이션 도구와 조합하면 무중단 업데이트가 가능하다. 
+
 ## 14.1 도커를 사용한 애플리케이션 업그레이드 프로세스
+
+배포 주기는 다음 네가지 주기를 고려해야 한다
+
+1. 의존 모듈 업데이트
+2. 애플리케이션 코드 컴파일 sdk 업데이트
+3. 애플리케이션 플랫폼 업데이트
+4. 운영체제 업데이트
+
+라이브러리 업데이트, sdk 업데이트까지 반영하려면 정해진 주기 없이 주기적으로 애플리케이션을 업데이트 해야한다.
+
+빌드 파이프라인이 프로젝트의 핵심을 차지하는것도 이때문이다. 
+
+롤링 업데이트에서  헬스 체크가 없다면 업데이트 성공 여부를 알 수 없기 때문에 헬스체크가 필요하다
+
+```
+# docker-compose.yml
+version: "3.7"
+
+services:
+  numbers-api:
+    image: diamol/ch08-numbers-api
+    networks:
+      - app-net
+
+  numbers-web:
+    image: diamol/ch08-numbers-web
+    environment:
+      - RngApi__Url=http://numbers-api/rng
+    networks:
+      - app-net
+
+
+# prod.yml
+version: "3.7"
+
+services:
+  numbers-api:
+    deploy:
+      replicas: 6
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 75M
+
+  numbers-web:
+    ports:
+      - target: 80
+        published: 80
+        mode: host
+    deploy:
+      mode: global
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 150M
+
+networks:
+  app-net:
+    name: numbers-prod
+
+
+# prod-healthcheck
+version: "3.7"
+
+services:
+  numbers-api:
+    healthcheck:
+      test: ["CMD", "dotnet", "Utilities.HttpCheck.dll", "-u", "http://localhost/health", "-t", "500"]
+      interval: 2s
+      timeout: 3s
+      retries: 2
+      start_period: 5s
+
+  numbers-web:
+    healthcheck:
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+# v2.yml
+version: "3.7"
+
+services:
+  numbers-api:
+    image: diamol/ch08-numbers-api:v2
+
+  numbers-web:
+    image: diamol/ch08-numbers-web:v2
+
+```
+
+이 세 파일을 병합하여 실행한다
+
+```
+docker-compose -f docker-compose.yml -f prod.yml -f prod-healthcheck.yml -f v2.yml --log-level ERROR config > stack.yml
+
+docker stack deploy -c stack.yml numbers
+
+docker stack ps numbers
+```
+
+
 
 ## 14.2 운영 환경을 위한 롤링 업데이트 설정하기
 
+롤링 업데이트의 세세한 방식은 컴포즈 파일 내 서비스 정의의 deploy 항목에서 설정할 수 있다.
+
+```yaml
+version: "3.7" # Docker Compose 파일의 버전 (3.7 버전을 사용)
+
+services:
+  numbers-api: # 서비스 이름 (numbers-api)
+    deploy: # 서비스 배포 설정
+      update_config: # 업데이트 설정 (서비스를 업데이트할 때의 동작 정의)
+        parallelism: 3 # 동시에 업데이트할 컨테이너의 개수 (최대 3개)
+        monitor: 60s # 업데이트 후 60초 동안 모니터링하여 상태 확인
+        failure_action: rollback # 업데이트 실패 시 롤백 수행
+        order: start-first # 새 컨테이너를 먼저 시작하고 기존 컨테이너를 중단 (무중단 배포)
+
+```
+
+
+
 ## 14.3 서비스 롤백 설정하기
 
-## 14.4 클러스터의 중단 시간
+롤링업데이트 옵션(deploy)이 start-first 방식으로 설정시 배포 실패할 경우 자동 롤백된다.
 
-## 14.5 스웜 클러스터의 고가용성
+업데이트 실패시 최대한 빨리 이전 버전으로 돌아가는 설정은 다음과 같다
 
-## 14.6 연습 문제
+```yaml
+version: "3.7" # Docker Compose 파일의 버전 (3.7 버전을 사용)
+
+services:
+  numbers-api: # 서비스 이름 (numbers-api)
+    deploy: # 서비스 배포 설정
+      rollback_config: # 롤백 설정 (배포 실패 시의 동작 정의)
+        parallelism: 6 # 동시에 롤백할 컨테이너의 개수 (최대 6개)
+        monitor: 0s # 롤백 후 모니터링 없이 바로 완료로 간주
+        failure_action: continue # 롤백 중 실패해도 나머지 작업 계속 진행
+        order: start-first # 새 컨테이너를 먼저 시작하고 기존 컨테이너를 중단 (무중단 롤백)
+
+```
+
+
 
 # 15장 보안 원격 접근 및 CI/CD를 위한 도커 설정
 
+도커 명령은 api로 지시를 전달하는거 뿐이지 직접 실행하는것이 아니다.
+
+도커 api를 안전하게 공개하고 이를 엔진에 접근하는 방법을 배운다. 
+
 ## 15.1 도커 API의 엔드포인트 형태
 
-## 15.2 보안 원격 접근을 위한 도커 엔진 설정
+도커 엔진 설정을 통해 원격 접속할 수 있다. 윈도 10이나 맥에서 도커 데스크톱 -> settings -> expose daemon on tcp://localhost:2375 without tls 체크 
 
-## 15.3 도커 컨텍스트를 사용해 원격 엔진에서 작업하기
+* 이거 안되서 아래로 해야함
 
-## 15.4 지속적 통합 파이프라인에 지속적 배포 추가하기
+```
+ettings.json
+```
 
-## 15.5 도커 리소스의 접근 모델
+해당 파일을 열어 다음 내용을 추가하거나 수정
 
-## 15.6 연습 문제
+```
+{
+  "builder": {
+    "gc": {
+      "defaultKeepStorage": "20GB",
+      "enabled": true
+    }
+  },
+  "hosts": [
+    "tcp://0.0.0.0:2375",
+    "fd://"
+  ],
+  "insecure-registries": [
+    "registry.local:5000"
+  ]
+}
+```
+
+```
+/Users/ysk/.docker/daemon.json 을 수정해도 안되서 아래 명령어로 사용함 
+```
+
+```
+curl --unix-socket /Users/ysk/.docker/run/docker.sock http://localhost:2375/containers/json
+```
+
+15장 패스. 현재 실습할 수 있는 것이랑 버전이 너무다름 
 
 # 16장 어디서든 실행할 수 있는 도커 이미지 만들기: 리눅스, 윈도, 인텔, ARM
 
 ## 16.1 다중 아키텍처 이미지가 중요한 이유
 
-## 16.2 다중 아키텍처 이미지를 만들기 위한 Dockerfile 스크립트
+arm 이미지는  amd와 인텔의 프로세서가 실행되는 환경에서 실행되지 않는다. 
 
-## 16.3 다중 아키텍처 이미지를 레지스트리에 푸시하기
+반대도 마찬가지다. 
+
+```
+a. Buildx 활성화
+
+docker buildx create --use
+
+b. 멀티플랫폼 이미지 빌드
+docker buildx build --platform linux/amd64,linux/arm64 -t my-app:latest --push .
+
+# 네이티브 아키텍처(인텔/AMD)로 이미지를 빌드한다
+docker image build -t diamol/ch16-folder-list:linux-amd64 -f ./Dockerfile.linux-amd64 .
+
+# 64비트 ARM 아키텍처로 이미지를 빌드한다
+docker image build -t diamol/ch16-folder-list:linux-arm64 -f ./Dockerfile.linux-arm64 --platform linux/arm64 .
+
+# 32비트 ARM 아키텍처로 이미지를 빌드한다
+docker image build -t diamol/ch16-folder-list:linux-arm -f ./Dockerfile.linux-arm --platform linux/arm .
+```
 
 ## 16.4 도커 Buildx를 사용해 다중 아키텍처 이미지 빌드하기
 
-## 16.5 개발 로드맵과 다중 아키텍처 이미지
+`docker buildx`는 Docker의 확장 빌드 도구로, 여러 플랫폼을 지원하는 멀티 아키텍처 이미지를 생성할 수 있는 기능을 제공한다. 로컬 머신에서 실행되는 빌드뿐 아니라 원격 빌드도 가능하며, 복잡한 Dockerfile을 효율적으로 처리할 수 있다.
 
-## 16.6 연습 문제
+```
+docker buildx version
+```
+
+`docker buildx`는 Docker의 확장 빌드 도구로, 여러 플랫폼을 지원하는 멀티 아키텍처 이미지를 생성할 수 있는 기능을 제공합니다. 이를 통해 로컬 머신에서 실행되는 빌드뿐 아니라 원격 빌드도 가능하며, 복잡한 Dockerfile을 효율적으로 처리할 수 있습니다.
+
+### 주요 기능
+
+1. 멀티 아키텍처 빌드 지원
+
+   :
+
+   - 예: `linux/amd64`, `linux/arm64`, `linux/arm` 등 다양한 플랫폼용 이미지를 빌드 가능.
+
+2. 캐시 공유
+
+   :
+
+   - 빌드 캐시를 공유하여 속도 향상.
+
+3. 외부 빌드 노드 지원
+
+   :
+
+   - 여러 머신에서 병렬 빌드 가능.
+
+4. 향상된 빌드 옵션
+
+   :
+
+   - 추가 기능과 설정을 지원하는 플래그 제공.
+
+------
+
+### 설치 및 활성화
+
+`buildx`는 Docker 19.03 이상 버전에 기본 포함되어 있으며, 다음 명령어로 활성화할 수 있습니다:
+
+```bash
+docker buildx install
+```
+
+활성화된 `buildx`를 확인하려면:
+
+```bash
+docker buildx version
+```
+
+### 사용 방법
+
+#### 1. **빌더 인스턴스 생성**
+
+`buildx` 빌더 인스턴스를 생성:
+
+```bash
+docker buildx create --name mybuilder --use
+```
+
+- `--name`: 빌더의 이름 지정.
+- `--use`: 생성한 빌더를 활성화.
+
+#### 2. **빌더 활성화 확인**
+
+```bash
+docker buildx inspect --bootstrap
+```
+
+- 활성화된 빌더를 확인하고 필요한 플랫폼 지원 여부를 확인.
+
+#### 3. **멀티 아키텍처 빌드**
+
+다양한 아키텍처를 지원하는 이미지를 빌드하려면:
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t username/image:tag .
+```
+
+- `--platform`: 지원할 플랫폼 목록 지정.
+- `-t`: 이미지 이름과 태그 지정.
+- `.`: Dockerfile 경로.
+
+#### 4. **이미지 푸시**
+
+빌드와 동시에 이미지를 푸시하려면 `--push` 옵션을 추가:
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 -t username/image:tag --push .
+```
+
+#### 5. **캐시 사용**
+
+빌드 시간을 단축하기 위해 캐시를 사용하려면:
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 -t username/image:tag --cache-to=type=inline --cache-from=type=registry,ref=username/image:tag .
+```
+
+------
+
+### 예제
+
+#### 1. 기본 멀티 아키텍처 이미지 빌드
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 -t myrepo/myapp:latest --push .
+```
+
+#### 2. 로컬 빌드
+
+테스트 목적으로 이미지를 로컬 빌드하려면:
+
+```bash
+docker buildx build --platform linux/amd64 -t myrepo/myapp:latest --load .
+```
+
+- `--load`: 이미지를 로컬 Docker 데몬에 로드.
+
+------
+
+### 장점
+
+- 하나의 명령어로 다양한 플랫폼에 대해 이미지를 빌드 가능.
+- 빌드 캐시 공유 및 재사용으로 속도 향상.
+- 멀티 노드를 활용한 병렬 빌드 가능.
 
 # 17장 도커 이미지 최적화하기: 보안, 용량, 속도
 
 ## 17.1 도커 이미지를 최적화하는 방법
 
+docker system df 명령을 사용하면 내려받은 이미지, 컨테이너, 볼드, 빌드 캐시 등이 점유하는 실제 디스크 용량을 알 수있다.
+
+```
+docker system df
+
+# 실제로 빌드캐시 18gb 이미지 18gb 정리함..
+ ✘ ysk 🐸   ~/.docker  docker system df
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          67        7         17.7GB    14.71GB (83%)
+Containers      7         0         69.71MB   69.71MB (100%)
+Local Volumes   17        3         1.972GB   780.9MB (39%)
+Build Cache     397       0         18.26GB   18.26GB
+```
+
+도커 이미지는 이미지 레이어가 쌓여서 만들어지는거라서, 각 레이어마다 최적화 하지 않으면 전체 용량은 줄어들지 않는다.
+
+또한 이미지 빌드시 주의해야할점이있다.
+
+도커의 빌드과정은 엔진에 빌드 컨텍스트(빌드를 실행한 디렉터리)를 압축하고 Docerfile 스크립트를 함께 보내면서 시작된다. 이 덕분에 원격 엔진에 이미지 빌드 명령을 내릴 수 있는것이다.
+
+빌드 컨텍스트에는 불필요한 파일이 포함된 경우가 많으므로 .dockerignore 파일에 불필요한 디렉터리나 파일 목록을 기재하여 컨텍스트에서 이들 파일을 제외하고 빌드하는것이 좋다.
+
+```
+# IDE 설정 파일 제외
+.classpath
+.project
+.settings/
+.idea/
+
+# 빌드된 파일 제외
+target/
+*.class
+
+# 로그 파일 제외
+*.log
+
+# 환경 파일 제외
+.env
+```
+
+
+
 ## 17.2 좋은 기반 이미지를 고르는 법
+
+기반 이미지 크기의 차이가 매우 다양할 수 있으므로 현명하게 골라야 한다.
+
+이미지가 작을수록 빌드 속도와 네트워크 전송 속도가 빨라진다. 
+
+리눅스 컨테이너는 알파인 리눅스, 데비안 슬림 이미지를 베이스 이미지로 좋다.
+
+* Python 프로젝트: `python:<버전>-slim`, `python:<버전>-alpine`.
+
+* Node.js 프로젝트: `node:<버전>-slim`, `node:<버전>-alpine`.
+
+* Java 프로젝트: `openjdk:<버전>-slim`, `eclipse-temurin:<버전>-jre`.
 
 ## 17.3 이미지 레이어 수와 이미지 크기는 최소한으로
 
+도커 파일에서 명령 한줄한줄 인스트럭션은 레이어가 되어서 한번에 실행시키는것이 좋다.
+
+그리고 실행한 후 로그나 필요업는 데이터는 지우는것이 좋다. 패키지 목록의 캐시까지 지우는것. 
+
+```dockerfile
+# 최적화 전
+FROM debian:stretch-slim
+
+RUN apt-get update
+RUN apt-get install -y curl=7.52.1-5+deb9u16
+RUN apt-get install -y socat=1.7.3.1-2+deb9u1
+
+# 최적화 후
+FROM debian:stretch-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+    curl=7.52.1-5+deb9u16 \
+    socat=1.7.3.1-2+deb9u1 \
+ && rm -rf /var/lib/apt/lists/*
+```
+
+다음 예는, 인터넷에서 압축된 패키지를 내려받고 불필요한 파일을 제거한다
+
+```dockerfile
+FROM diamol/base
+
+ARG DATASET_URL=https://archive.ics.uci.edu/ml/machine-learning-databases/url/url_svmlight.tar.gz
+
+WORKDIR /dataset
+
+RUN wget -O dataset.tar.gz ${DATASET_URL} && \
+    tar xvzf dataset.tar.gz
+
+WORKDIR /dataset/url_svmlight
+RUN cp Day1.svm Day1.bak && \
+    rm -f *.svm && \
+    mv Day1.bak Day1.svm
+```
+
+
+
+
+
 ## 17.4 멀티 스테이지 빌드를 한 단계 업그레이드하기
+
+멀티 스테이지 빌드 : 빌드단계, 패키징, 실행단계를 나누어 사용하는것.
+
+멀티스테이지 빌드 캐시를 잘 활용하면 소스 코드 수정시마다 빠르게 진행되어 빌드 시간을 엄청나게 줄일 수 있다. 
 
 ## 17.5 최적화가 중요한 이유
 
+베스트 프랙티스
+
+* 기반 이미지 잘 고르기. 자신만의 골든 이미지를 갖출 수 있다면 이상적이다.
+
+* 아주 간단한 애플리케이션이 아니라면 멀티 스테이지 빌드를 적용한다.
+* 불필요한 패키지나 파일을 포함시키지 말고, 레이어 크기를 최소한으로 유지한다.
+* Dockerfile 스크립트의 인스트럭션은 자주 수정하는 순서대로 뒤에 오도록 배치해 캐시를 최대한 활용한다.
+
+![image-20241208230617909](./images//image-20241208230617909.png)
+
 ## 17.6 연습 문제
+
+- ﻿﻿이미지 파일 시스템을 최적화해서 리눅스 컨테이너는 80MB 이하, 윈도 컨테이너는 330MB 이하가 되도록 하라.
+- ﻿﻿이미지 레이어 캐시를 적극 활용해 이미지 빌드 시간을 1초 이내로 단축한다.
+- ﻿﻿docker run 〈image〉 docker version 명령을 실행해 도커 명령행의 버전을 출력하는 이미 지를 빌드하라(도커 엔진에 접속하지 못하므로 오류를 일으키겠지만, 그래도 버전은 제대로 출력된다).
+
+```
+# Base image: lightweight Alpine Linux
+FROM alpine:3.18
+
+# Install Docker CLI
+RUN apk add --no-cache docker
+
+# Command to print Docker CLI version
+CMD ["docker", "version"]
+```
+
+
 
 # 18장 컨테이너의 애플리케이션 설정 관리
 
 ## 18.1 다단 애플리케이션 설정
+
+설정 모델은 설정에 담긴 데이터의 구조를 반영해야 한다. 설정 데이터의 종류는 주로 다음 세 가 지다.
+
+- ﻿﻿버전에 따라 달라지는 설정: 모든 환경에서 동일하지만 버전별로 달라지는 설정
+- ﻿﻿환경에 따라 달라지는 설정: 환경별로 달라지는 설정
+- ﻿﻿기능 설정: 버전별로 애플리케이션의 동작을 달리하기 위한 설정
+
+
+
+
 
 ## 18.2 환경별 설정 패키징하기
 
