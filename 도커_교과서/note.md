@@ -3610,7 +3610,24 @@ CMD ["docker", "version"]
 
 ## 18.2 환경별 설정 패키징하기
 
+닷넷 코어는 다음과 같은 파일로부터 기본 설정값을 읽어 들인다
+
+* appsettings.json, appsettiongs.{환경이름}.json
+* spring에서는 yml, properties가 있따
+
+설정파일과 소스코드를 별도의 시스템으로 분리하여 관리한다면, 설정 파일을 소스코드로 가져와 이미지를 빌드해서 테스트 과정을 ci/cd 등에 넣거나 다양한 프로파일로 운영할 수 있게 된다.
+
+
+
 ## 18.3 런타임에서 설정 읽어 들이기
+
+예제는 고랭이지만, 스프링은 위와같다.
+
+비밀값 등을 사용한 민감 정보를 API를 통해 아무나 보게 할 수는 없는 노릇이므로 설정 API를 만들 때는 다음과 같은 사항을 지켜야 한다.
+
+- ﻿﻿전체 설정을 공개하지 않는다. 민감하지 않은 정보만 선택하되 민감한 정보는 절대 포함시 키지 않는다.
+- ﻿﻿허가받은 사용자만이 접근할 수 있도록 엔드포인트에 보안을 설정한다.
+- ﻿﻿설정 API의 사용 여부를 설정할 수 있도록 한다.
 
 ## 18.4 레거시 애플리케이션에 설정 전략 적용하기
 
@@ -3620,52 +3637,504 @@ CMD ["docker", "version"]
 
 # 19장 도커를 이용한 로그 생성 및 관리
 
+도커는 표준 출력 스트림을 통해 로그를 수집한다.
+
+플러그인 로깅 프레임워크를 가지고 있어 도커가 출력된 로그를 원하는 곳으로 전달하여 로그를 중앙 로그 저장소에 저장하고 수집된 로그를 검색할 수도 있다. 
+
 ## 19.1 표준 에러 스트림과 표준 출력 스트림
 
+표준 출력 : stdout, 표준 오류 stderror
+
+* 표준 출력 : 프로그램이 데이터 출력하는데 사용하는 스트림. 
+* 표준 에러 : 오류나 경고 메시지를 출력하는 스트림
+
+표준 출력과 표준 오류는 별도의 스트림으로 처리되어서 로그를 분리하거나 오류를 별도로 관리해야 한다.
+
+자바 스프링 계열에서는 system.out.print, system.error.print, log.info, log.error 등이 있다.
+
+
+
+또한 종료된 컨테이너의 로그를 수집할 수 있도록 로그를 JSON 파일로도 저장하며 이 파일은 도커 컨테이너와 동일한 생애주기를 가져서 컨테이너가 삭제되면 로그도 삭제된다.
+
+**도커 로그와 로그 파일 경로를 확인하는 다양한 명령어들**
+
+**로그 드라이버(Log Driver)**는 도커 컨테이너의 로그를 저장하거나 전송하는 방식(메커니즘)을 정의하는 컴포넌트
+
+- **역할**:
+  - 도커 컨테이너에서 발생하는 표준 출력(stdout) 및 표준 오류(stderr)의 로그를 수집
+  - 로그를 특정 저장소(파일, 시스템 로그, 외부 서비스 등)에 저장하거나 외부 서비스로 전송
+
+### 1. `docker logs` 명령어
+
+컨테이너의 표준 출력(stdout)과 표준 오류(stderr)에 기록된 로그를 확인할 수 있습니다.
+
+- **기본 로그 보기**
+
+  ```bash
+  docker logs <컨테이너_이름_또는_ID>
+  ```
+
+- **실시간 로그 보기 (Follow)**
+
+  실시간으로 로그를 모니터링할 때 사용합니다.
+
+  ```bash
+  docker logs -f <컨테이너_이름_또는_ID>
+  ```
+
+- **특정 시간 이후의 로그 보기**
+
+  예를 들어, 지난 10분간의 로그를 보고 싶을 때:
+
+  ```bash
+  docker logs --since 10m <컨테이너_이름_또는_ID>
+  ```
+
+- **최근 N줄의 로그 보기 (Tail)**
+
+  최근 100줄의 로그를 보고 싶을 때:
+
+  ```bash
+  docker logs --tail 100 <컨테이너_이름_또는_ID>
+  ```
+
+- **타임스탬프와 함께 로그 보기**
+
+  로그 메시지에 타임스탬프를 포함시킵니다.
+
+  ```bash
+  docker logs --timestamps <컨테이너_이름_또는_ID>
+  ```
+
+### 2. 컨테이너의 로그 드라이버 확인 및 설정
+
+도커는 다양한 로그 드라이버를 지원하며, 각 드라이버에 따라 로그의 저장 위치와 방식이 다릅니다.
+
+- **현재 컨테이너의 로그 드라이버 확인**
+
+  ```bash
+  docker inspect --format='{{.HostConfig.LogConfig.Type}}' <컨테이너_이름_또는_ID>
+  ```
+
+- **컨테이너 생성 시 로그 드라이버 지정**
+
+  예를 들어, `json-file` 드라이버를 사용하여 컨테이너를 실행할 때:
+
+  ```bash
+  docker run --log-driver=json-file <이미지_이름>
+  ```
+
+- **도커 데몬의 기본 로그 드라이버 확인**
+
+  ```bash
+  docker info | grep 'Logging Driver'
+  ```
+
+### 3. 도커 데몬의 로그 파일 경로 확인
+
+도커 데몬 자체의 로그 파일 위치는 운영체제에 따라 다릅니다.
+
+- **Linux (systemd 사용 시)**
+
+  ```bash
+  journalctl -u docker.service
+  ```
+
+- **Linux (로그 파일 직접 확인 시)**
+
+  일반적으로 `/var/log/docker.log` 또는 `/var/log/upstart/docker.log`에 위치할 수 있습니다.
+
+  ```bash
+  sudo tail -f /var/log/docker.log
+  ```
+
+- **macOS 및 Windows**
+
+  Docker Desktop을 사용하는 경우, 로그 파일은 GUI를 통해 접근할 수 있습니다.
+
+  - **macOS**: `~/Library/Containers/com.docker.docker/Data/log`
+  - **Windows**: `%APPDATA%\Docker\log.txt`
+
+### 4. 컨테이너 내부의 로그 파일 경로 확인
+
+일부 애플리케이션은 컨테이너 내부에 별도의 로그 파일을 생성합니다. 이러한 경우 `docker inspect` 명령어를 사용하여 로그 파일의 경로를 확인할 수 있습니다.
+
+- **컨테이너의 마운트된 볼륨 확인**
+
+  ```bash
+  docker inspect --format='{{json .Mounts}}' <컨테이너_이름_또는_ID>
+  ```
+
+- **애플리케이션 별 로그 파일 경로 파악**
+
+  예를 들어, Nginx 컨테이너의 로그 파일 경로를 확인하려면:
+
+  ```bash
+  docker exec -it <nginx_컨테이너_이름_또는_ID> cat /var/log/nginx/access.log
+  docker exec -it <nginx_컨테이너_이름_또는_ID> cat /var/log/nginx/error.log
+  ```
+
+### 6. 기타 유용한 명령어
+
+- **모든 실행 중인 컨테이너의 로그 보기**
+
+  ```bash
+  docker ps -q | xargs docker logs
+  ```
+
+- **로그 포맷 지정**
+
+  JSON 형태로 로그를 출력할 때:
+
+  ```bash
+  docker logs --format '{{json .}}' <컨테이너_이름_또는_ID>
+  ```
+
+- **로그를 파일로 저장**
+
+  ```bash
+  docker logs <컨테이너_이름_또는_ID> > container.log
+  ```
+
+### 7. 예제 시나리오
+
+- **Nginx 컨테이너의 최근 50줄 로그를 실시간으로 모니터링**
+
+  ```bash
+  docker logs -f --tail 50 <nginx_컨테이너_이름_또는_ID>
+  ```
+
+- **애플리케이션 컨테이너의 로그 드라이버를 `syslog`로 변경하고 재시작**
+
+  ```bash
+  docker run --log-driver=syslog <이미지_이름>
+  ```
+
+- **도커 데몬의 로그를 systemd journal에서 확인**
+
+  ```bash
+  journalctl -u docker.service -f
+  ```
+
+### 로깅 옵션
+
+`--log-opt` 옵션을 사용하여 로그 드라이버에 필요한 세부 설정을 추가합니다.
+
+- **예: `json-file` 드라이버**
+
+  ```
+  docker run \
+    --log-driver=json-file \
+    --log-opt max-size=10m \
+    --log-opt max-file=3 \
+    <이미지_이름>
+  ```
+
+  - `max-size`: 로그 파일의 최대 크기 (예: 10MB).
+  - `max-file`: 로그 파일의 최대 개수 (예: 3개).
+
+- **예: `syslog` 드라이버**
+
+  ```
+  docker run \
+    --log-driver=syslog \
+    --log-opt syslog-address=udp://192.168.1.100:514 \
+    --log-opt syslog-format=rfc5424micro \
+    <이미지_이름>
+  ```
+
+```
+version: '3.9'
+services:
+  app:
+    image: my-app-image
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+```
+
+새 파일이 생성될 때 기존 로그 파일의 수가 `max-file`에 도달하면, **가장 오래된 파일이 삭제**된다.
+
+
+
 ## 19.2 다른 곳으로 출력된 로그를 stdout 스트림에 전달하기
+
+fluentd는 통합 로깅 계층이다. 통합 로깅 계층은 다양한 곳에서 생성되는 로그를 모으고, 필터링 과 가공을 거쳐 다시 여러 대상으로 수집된 로그를 포워딩하는 역할을 한다. fluentd 프로젝트는 클라우드 네이티브 컴퓨팅 재단에서 관리한다. 
+
+fluendtd를 컨테이너로 실행하고 다른 컨테이너에서 json 파일 대신 fluentd 로깅 드라이버를 사용하도록 하면 컨테이너에서 생성되는 로그가 fluentd 컨테이너로 전송된다. 
+
+```
+docker run -d -p 24224:24224 --name fluentd -v "$(pwd)/conf:/fluentd/etc" \
+-e FLUENTD_CONF=stdout.conf diamol/fluentd
+
+docker container run -d --log-driver=fluentd \
+--log-opt fluentd-address=localhost:24224 \
+--name timecheck5 image
+
+docker container logs --tail 1 fluentd 
+```
+
+수집된 로그는 대게 중앙 저장소로 이동하여 엘라스틱 서치와 키바나와 함께 쓰인다 
 
 ## 19.3 컨테이너 로그 수집 및 포워딩하기
 
 ## 19.4 로그 출력 및 로그 컬렉션 관리하기
 
+Fluentd의 작동 방식은 크게 **Input**, **Filter**, **Output**의 3단계로 구성됩니다:
+
+1. **Input (입력)**:
+   - 로그 데이터를 수집하는 단계.
+   - 예: 애플리케이션 로그, 서버 로그, 데이터베이스 로그 등.
+   - 대표적인 플러그인: `in_tail`, `in_http`, `in_syslog`.
+2. **Filter (필터링 및 변환)**:
+   - 수집된 데이터를 변환, 필터링 또는 집계하는 단계.
+   - 필요에 따라 데이터를 재구성하거나 필드를 추가/삭제.
+   - 대표적인 플러그인: `grep`, `record_transformer`.
+3. **Output (출력)**:
+   - 처리된 데이터를 저장하거나 외부 시스템으로 전송.
+   - 예: Elasticsearch, AWS S3, MongoDB 등.
+   - 대표적인 플러그인: `out_elasticsearch`, `out_kafka`, `out_file`.
+
+
+
+플루언트디는 위 과정을 거친다. 
+
 ## 19.5 컨테이너의 로깅 모델
+
+efk 스택은 단일 머신에서도 무리없지만 운영환경에 맞춰 수평 확장하여 관리하기도 쉽다 
+
+![image-20241221000839846](./images//image-20241221000839846.png)
 
 ## 19.6 연습 문제
 
+컴포즈 파일
+
+```
+version: "3.7"
+
+services:
+  numbers-api:
+    logging:
+      driver: "fluentd"
+      options:
+        tag: "numbers.api.{{.ImageName}}"
+
+  numbers-web:
+    logging:
+      driver: "fluentd"
+      options:
+        tag: "numbers.web.{{.ImageName}}"
+
+```
+
+
+
 # 20장 리버스 프록시를 이용해 컨테이너 HTTP 트래픽 제어하기
+
+외부에서 들어온 트래픽을 컨테이너까지 이어주는 라우팅은 도커 엔진이 담당하지만, 컨테이너가 주시할 수 있는 포트는 하나뿐이다. 클러스터 하나에서 수없이 많은 애플리케이션을 실행해야 하기 때문이고 또한 이들 모두를 http와 https 80/443을 통해 접근가능하게 해야해서 포트가 부족하다.
+
+
+
+리버스 프록시는 이런 경우에 유용하다. 
 
 ## 20.1 리버스 프록시란?
 
-## 20.2 리버스 프록시의 라우팅과 SSL 적용하기
+프록시는 클라이언트를 감춰준다. 리버스 프록시는 서버를 감춰주는것이다.
+
+**리버스 프록시(Reverse Proxy)**는 클라이언트가 직접 백엔드 서버에 요청을 보내지 않고, **프록시 서버가 클라이언트 요청을 받아 백엔드 서버로 전달하고 응답을 다시 클라이언트로 전달**하는 방식의 서버다.
+
+![image-20241221001207357](./images//image-20241221001207357.png)
+
+리버스 프록시 덕분에 컨테이너는 외부에 노출될 필요 없으며, 그만큼 스케일링 업데이트 보안면에서 유리하다.
+
+엔진엑스는 웹 사이트별로 설정 파일을 둘 수 있다(도메인별로)
+
+아래는 각각 다른 파일이다. 
+
+```
+1
+server {
+    server_name api.numbers.local;
+
+    location / {
+        proxy_pass             http://numbers-api;
+        proxy_set_header       Host $host;
+        add_header             X-Host $hostname;         
+    }
+}
+
+
+2
+server {
+    server_name image-gallery.local;
+
+    location = /api/image {
+        proxy_pass             http://iotd/image;
+        proxy_set_header       Host $host;
+        add_header             X-Proxy $hostname;         
+        add_header             X-Upstream $upstream_addr;
+    }
+
+    location / {
+        proxy_pass             http://image-gallery;
+        proxy_set_header       Host $host;
+        add_header             X-Proxy $hostname;         
+        add_header             X-Upstream $upstream_addr;
+    }        
+}
+
+
+3
+server {
+    server_name whoami.local;
+
+    location / {
+        proxy_pass             http://whoami;
+        proxy_set_header       Host $host;
+        add_header             X-Host $hostname;         
+    }
+}
+```
+
+http 요청 헤더에 Host라는 사이트 정보를 넣는데,(도메인) 이 정보로 해당 요청을 처리할 수 있는 사이트의 설정 파일을 찾아 트래픽을 연결한다. 
+
+위 설정파일을 엔진엑스에 넣어주고, 네트워크를 같은 네트워크끼리 묶으면 엔진엑스가 앞단에서 요청을 받아 적절한 컨테이너에게 라우팅 해준다. 
 
 ## 20.3 프록시를 이용한 성능 및 신뢰성 개선
 
-## 20.4 클라우드 네이티브 리버스 프록시
+캐싱을 활용해서, 로컬디스크나 메모리에 저장해두었다 저장된것을 돌려줄 수 있다.
+
+캐싱 프록시의 장점은 요청 처리하는 시간을 줄일 수 있으며 트래픽을 줄일 수 있어 더많은 요청을 처리할 수 있다.
+
+단 인증 정보를 포함한 요청은 캐싱하지 않으면 개인화된 콘텐츠는 제외할 수 있다. 
+
+```
+server {
+    server_name image-gallery.local;
+    listen 80;
+	return 301 https://$server_name$request_uri;
+}
+
+server {
+	server_name  image-gallery.local;
+	listen 443 ssl;
+    
+    gzip  on;    
+    gzip_proxied any;
+
+	ssl_certificate        /etc/nginx/certs/server-cert.pem;
+	ssl_certificate_key    /etc/nginx/certs/server-key.pem;
+	ssl_session_cache      shared:SSL:10m;
+	ssl_session_timeout    20m;
+	ssl_protocols          TLSv1 TLSv1.1 TLSv1.2;
+
+	ssl_prefer_server_ciphers on;
+	ssl_ciphers 'EECDH+AESGCM:EDH+AESGCM:AES256+EECDH:AES256+EDH';
+
+	add_header  Strict-Transport-Security "max-age=31536000" always;
+
+    # 특정 경로 `/api/image`에 대한 요청을 처리
+    # 프록시로 지정된 URL로 요청을 전달 (http://iotd/image)
+    # 클라이언트의 Host 헤더를 백엔드 서버로 전달
+    # SHORT 캐시 정책을 적용
+    # HTTP 상태 코드 200인 응답은 1분 동안 캐싱
+    # 캐싱 상태를 나타내는 헤더를 클라이언트 응답에 추가 (X-Cache)
+    # 프록시 서버의 호스트 이름을 응답 헤더에 추가 (X-Proxy)
+    # 프록시로 전달된 백엔드 서버 주소를 응답 헤더에 추가 (X-Upstream)
+    location = /api/image {
+        proxy_pass             http://iotd/image;
+        proxy_set_header       Host $host;
+        proxy_cache            SHORT;
+        proxy_cache_valid      200  1m;
+        add_header             X-Cache $upstream_cache_status;
+        add_header             X-Proxy $hostname;         
+        add_header             X-Upstream $upstream_addr;
+    }
+
+    # 기본 경로 `/`에 대한 요청 처리
+    # 프록시로 지정된 URL로 요청을 전달 (http://image-gallery)
+    # 클라이언트의 Host 헤더를 백엔드 서버로 전달
+    # LONG 캐시 정책을 적용
+    # HTTP 상태 코드 200인 응답은 6시간 동안 캐싱
+    # 특정 오류나 시간 초과가 발생하면 캐시된 오래된 데이터를 사용 (http_500, http_502 등 포함)
+    # 캐싱 상태를 나타내는 헤더를 클라이언트 응답에 추가 (X-Cache)
+    # 프록시 서버의 호스트 이름을 응답 헤더에 추가 (X-Proxy)
+    # 프록시로 전달된 백엔드 서버 주소를 응답 헤더에 추가 (X-Upstream)
+    location / {
+        proxy_pass             http://image-gallery;
+        proxy_set_header       Host $host;
+        proxy_cache            LONG;
+        proxy_cache_valid      200  6h;
+        proxy_cache_use_stale  error timeout invalid_header updating
+                               http_500 http_502 http_503 http_504;
+        add_header             X-Cache $upstream_cache_status;
+        add_header             X-Proxy $hostname;         
+        add_header             X-Upstream $upstream_addr;
+    }
+
+}
+```
+
+그 외에도 gzip 압축, 캐시 헤더 추가 등을 활용할 수 있다. 
 
 ## 20.5 리버스 프록시를 활용한 패턴의 이해
 
-## 20.6 연습 문제
+리버스 프록시가 있어야 적용할 수 있는 세 가지 주요 패턴이 있다.
+
+1. 클라이언트 요청에 포함된 호스트명을 통해 http 혹은 https로 제공되는 애플리케이션에서 콘텐츠 제공하는 패턴. 즉 알맞는 도메인으로 알맞은 컨테이너로 전달하여 요청을 제공한다 
+2. 한 애플리케이션이 여러 컨테이너에 걸쳐 실행되는 msa 패턴에 실행된다. 요소 중 일부만을 선택적으로 요청하여 외부에서는 하나의 도메인을 갖지만 경로에 따라 여러 서비스가 요청을 처리하는 구조 
+3. 모놀리식 설계를 가진 애플리케이션을 컨테이너로 이주시킬때 유용한 패턴이다. 리버스 프록시를 두어 모놀리식 설게를 가진 애플리케이션의 프론트엔드를 맡기고, 추가되는 기능은 컨테이너로 분할한다. 즉 점진적으로 이동한다. 
 
 # 21장 메시지 큐를 이용한 비동기 통신
 
+api 말고, 컴포넌트 끼리 직접 주고받는 대신 메시지 큐를 둬서 컴포넌트간의 결합을 느슨하게 하는 효과가 있다.
+
 ## 21.1 비동기 메시징이란?
 
-## 21.2 클라우드 네이티브 메시지 큐 사용하기
+api같은 동기적 통신은 서버가 다운돼거나 기능을 상실하거나 타임아웃 시간이 만료될 수 있다. 이는 큰 장애로 이어질 수 있다. 비동기 통신을 적용하면 클라이언트와 서버 사이에 계층이 하나 끼고, 클라이언트는 큐로, 서버는 큐를 주시하다 메시지를 수신하고 처리한다. 
 
-## 21.3 메시지 수신 및 처리
+![image-20241221010146631](./images//image-20241221010146631.png)
 
-## 21.4 메시지 핸들러로 기능 추가하기
+메시징은 매력적인 수단이지만 몇가지 문제가 있따.
+
+1. 큐를 제공하는 기술의 신뢰성이 뛰어나야함
+2. 큐의 사용료
+3. 다양한 프로파일에서의 큐 유지
 
 ## 21.5 비동기 메시징 패턴 이해하기
 
-## 21.6 연습 문제
+pub-sub 패턴에 적합하지 않은 경우는 퍼블리셔가 메시지를 사용하는것이 누구이고 어떻게 처리하며 언제 끝나는지 필요하면 이 패턴을 쓸 수 없다. 이는 request-response패턴에서 적합하다. 
+
+이 패턴에서는 클라이언트 -> 메시지큐 -> 처리 핸들러 -> 응답 메시지 큐 -> 클라이언트 로 처리하는 방식이다. 
+
+대부분 메시지 큐 기술은 fire-and-forget (보내고 신경 끔)을 사용하는것에 적합하다. 
+
+* 이해가 잘 안되는데 일반적인 api에서 처음 클라이언트의 요청을 게속 묶고있는건가? 기술적으로 가능해도 응답이 매우 느릴텐데. 
 
 # 22장 끝없는 정진
 
 ## 22.1 도커를 이용한 개념 검증
 
+컨테이너의 위력을 팀원들과 공유하고 싶다면 개념 검증 애플리케이션을 만드는것이 좋다 .
+
+1. 여러개의 컴포넌트를 컨테이너화 한다
+2. 도커로 이주하면 전체 ci -cd 사이클을 어떻게 개선할 수 있을지 어필한다
+3. 중앙화된 로그 수집 및 컨테이너 정보 수집을 한다
+
+
+
 ## 22.2 소속 조직에서 도커의 유용함을 입증하라
 
+핵심 이해관계자와 결정권자를 다음과 같이 설득시킬 수 있다.
+
+* 개발자는 전체 애플리케이션 스택을 개발용 컴퓨터에서 운영환경과 동일한 환경으로 실행 가능해서 개발에만 전념 가능하다.
+* 운영에 필요한 표준 도구를 갖게 된다.
+* 기존 가상 머신에서 컨테이너로 이전하면 줄어드는 서버 대수만큼 큰 비용을 절감 가능하다 -> 운영체제 라이선스 등
+
 ## 22.3 운영 환경으로 가는 길
+
+클라우드 환경을 목표로 한다면 쿠버네티스로 시작하는 편이 낫다. 
 
 ## 22.4 도커 커뮤니티 소개
