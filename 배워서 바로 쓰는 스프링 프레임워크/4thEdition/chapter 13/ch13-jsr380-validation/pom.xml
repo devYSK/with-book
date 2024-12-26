@@ -8,7 +8,7 @@
 	<version>0.1.0.BUILD-SNAPSHOT</version>
 	<name>ch13-jsr380-validation</name>
 	<properties>
-		<spring.version>5.0.1.RELEASE</spring.version>
+		<spring.version>5.0.16.RELEASE</spring.version>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 	</properties>
 	<repositories>
