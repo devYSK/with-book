@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: spring-kafka
+  kafka:
+    producer:
+      bootstrap-servers: my-kafka:9092
+      acks: all
