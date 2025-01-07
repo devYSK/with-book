@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  ###############################################################################
+  # Zookeeper(싱글 노드)
+  ###############################################################################
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest     ## Confluent Zookeeper 최신 이미지
+    container_name: zookeeper
+    ports:
+      - "2181:2181"                             ## 호스트의 2181 포트를 컨테이너의 2181 포트와 매핑
+    environment:
+      ## Zookeeper가 클라이언트와 통신할 포트
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ## 단일 환경에서의 기본 tickTime 설정
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - ./zookeeper_data_single:/var/lib/zookeeper/data  ## Zookeeper 데이터 디렉토리 (현 디렉토리)
+      - ./zookeeper_log_single:/var/lib/zookeeper/log    ## Zookeeper 로그 디렉토리 (현 디렉토리)
+    # ------------------------------------------------
+
+  ###############################################################################
+  # Kafka 브로커(싱글 노드)
+  ###############################################################################
+  kafka:
+    image: confluentinc/cp-kafka:latest         ## Confluent Kafka 최신 이미지
+    container_name: kafka_broker_single
+    depends_on:
+      - zookeeper                               ## zookeeper 서비스를 먼저 띄움
+    ports:
+      - "9092:9092"                             ## 호스트의 9092 포트를 컨테이너의 9092와 매핑
+    environment:
+      ## 브로커 고유 ID
+      KAFKA_BROKER_ID: 1
+      ## Zookeeper 접속 정보 (호스트명:포트)
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      ## 클라이언트(호스트)에서 접속할 브로커 주소
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      ## 브로커 내부에서 열리는 리스너
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      ## 자동으로 토픽 생성 여부 (테스트 환경에서 편의성)
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      ## 오프셋 토픽 복제 계수 (싱글 브로커이므로 1)
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      ## 트랜잭션 로그 관련(싱글 브로커이므로 1)
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    volumes:
+      - ./kafka_data_single:/var/lib/kafka/data        ## Kafka 데이터 디렉토리 (현 디렉토리)
+    # ------------------------------------------------
+
+volumes: {}
+  ## docker compose down -v로 제거 가능하도록 named volume이 아닌 bind mount 사용
+
