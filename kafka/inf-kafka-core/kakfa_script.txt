@@ -1,0 +1,333 @@
+#################################
+#      주키퍼, 카프카 기동 스크립트       #
+#################################
+
+1. zookeeper start script
+
+vi zoo_start.sh
+$CONFLUENT_HOME/bin/zookeeper-server-start $CONFLUENT_HOME/etc/kafka/zookeeper.properties
+
+2. kafka start script
+
+vi kafka_start.sh
+$CONFLUENT_HOME/bin/kafka-server-start $CONFLUENT_HOME/etc/kafka/server.properties
+
+
+#################################
+#      Topic 생성/조회 스크립트       #
+#################################
+
+1. Topic 생성(기본 partition 개수 1, replication-factor 1, Topic명에 _ 들어갈 시 유의)
+kafka-topics --bootstrap-server localhost:9092 --create --topic test_topic_01
+
+2. Topic 생성(기본 partition 개수 3)
+
+kafka-topics --bootstrap-server localhost:9092 --create --topic test_topic_02 
+--partitions 3
+
+3. Topic 생성(기본 partition 개수 3, replication-factor 2)
+kafka-topics --bootstrap-server localhost:9092 --create --topic test_topic_03 
+--partitions 3 --replication-factor 2
+
+4. Topic의 리스트 조회
+kafka-topics --bootstrap-server localhost:9092 --list
+
+5. 특정 Topic의 상세 정보
+kafka-topics --bootstrap-server localhost:9092 --topic test_topic_01 --describe
+
+6. 특정 Topic 삭제
+kafka-topics --bootstrap-server localhost:9092 --topic test_topic_02 --delete
+
+
+#############################################################
+#      kafka-console-producer, kafka-console-consumer       #
+#############################################################
+
+1. test-topic 토픽 생성하기
+kafka-topics --bootstrap-server localhost:9092 --create --topic test-topic
+
+2. kafka-console-producer로 메시지 보내기
+kafka-console-producer --bootstrap-server localhost:9092 --topic test-topic
+
+3. kafka-console-consumer로 메시지 읽기
+kafka-console-consumer --bootstrap-server localhost:9092 --topic test-topic
+
+#############################################################
+#             Key 메시지 전송.                                  #
+#############################################################
+
+1. key message를 kafka-console-producer를 이용하여 전송
+kafka-console-producer --bootstrap-server localhost:9092 --topic test-topic \
+--property key.separator=: --property parse.key=true
+
+2. key message를 kafka-console-consumer에서 읽어들임.
+kafka-console-consumer --bootstrap-server localhost:9092 --topic test-topic \
+--property print.key=true --property print.value=true --from-beginning
+
+
+#############################################################
+#  여러개의 partition을 가지는 Topic에 메시지 전송                     #
+#############################################################
+
+1. 3개의 partition을 가지는 Topic 생성
+kafka-topics --bootstrap-server localhost:9092 --create --topic multipart-topic --partitions 3
+
+2. kafka-console-consumer 수행하여 메시지 읽기 대기. 
+kafka-console-consumer --bootstrap-server localhost:9092 --topic multipart-topic
+
+3. Topic에 kafka-console-producer 수행하여 메시지 전송
+kafka-console-producer --bootstrap-server localhost:9092 --topic multipart-topic
+
+4. Topic에 kafka-console-consumer를 --from-beginning으로 수행하고 읽어들인 메시지와 partition 번호 확인. 
+kafka-console-consumer --bootstrap-server localhost:9092 --topic multipart-topic \
+--from-beginning --property print.partition=true
+
+5. Key를 가지는 메시지를 전송
+kafka-console-producer --bootstrap-server localhost:9092 --topic multipart-topic \
+--property key.separator=: --property parse.key=true
+
+6. Key를 가지는 메시지를 읽어들임. 
+kafka-console-consumer --bootstrap-server localhost:9092 --topic multipart-topic \
+--property print.key=true --property print.value=true \
+--property print.partition=true
+
+#############################################################
+#  Non Key 메시지의 파티셔닝 분배 전략                    #
+#############################################################
+
+1. load.log 파일 만들기
+touch load.log
+
+2. Non key 메시지 2000개를 load.log에 기록하기. 
+for i in {1..2000}
+do
+echo "test nonkey message sent test00000000000000 $i" >> load.log
+done
+
+3. load.log 파일 기반으로 메시지 2000개 전송. 
+kafka-console-producer --bootstrap-server localhost:9092 --topic multipart-topic < load.log
+
+
+#############################################################
+#  Consumer Group 기반의 Consumer                             #
+#############################################################
+
+1. Consumer Group id group_01을 가지는 consumer를 3개 생성(아래 명령어 3번 수행) 
+kafka-console-consumer --bootstrap-server localhost:9092 --group group_01 --topic multipart-topic \
+--property print.key=true --property print.value=true \
+--property print.partition=true
+
+2. keyload.log 파일 만들기
+touch keyload.log
+
+3. key 메시지 2000개를 keyload.log에 기록하기. 
+for i in {1..2000}
+do
+echo "$i:test key message sent test00000000000000 $i" >> keyload.log
+done
+
+4. keyload.log 파일 기반으로 메시지 2000개 전송. 
+kafka-console-producer --bootstrap-server localhost:9092 --topic multipart-topic \
+--property key.separator=: --property parse.key=true < keyload.log
+
+#############################################################
+#  kafka-configs를 이용한 환경 설정.                              #
+#############################################################
+
+1. broker 0번의 config 설정 확인.  
+kafka-configs --bootstrap-server localhost:9092 --entity-type brokers --entity-name 0 --all --describe
+
+2. topic의 config 설정 확인
+kafka-configs --bootstrap-server localhost:9092 --entity-type topics --entity-name multipart-topic --all --describe
+
+3. topic의 config 설정 변경
+kafka-configs --bootstrap-server localhost:9092 --entity-type topics --entity-name multipart-topic --alter \
+--add-config max.message.bytes=2088000
+
+4. 변경한 topic의 config를 다시 Default값으로 원복
+kafka-configs --bootstrap-server localhost:9092 --entity-type topics --entity-name multipart-topic --alter \
+--delete-config max.message.bytes
+
+#############################################################
+#  kafka-dump-log 명령어로 log 파일 내부 보기                       #
+#############################################################
+
+1. kafka-dump-log 명령어로 log 파일 내부 보기
+kafka-dump-log --deep-iteration --files /home/min/data/kafka-logs/multipart-topic-0/00000000000000000000.log --print-data-log
+
+
+#############################################################
+#   Java Produer Client 에서 Key 메시지 전송.                     #
+#############################################################
+
+1. Key 타입이 String인 경우 
+kafka-console-consumer --bootstrap-server localhost:9092 --group group-01 --topic multipart-topic \
+--property print.key=true --property print.value=true 
+
+2. Key 타입이 Integer인 경우 kafka-console-consumer에서 --key-deserializer 인자값 설정. 
+kafka-console-consumer --bootstrap-server localhost:9092 --group group-01 --topic multipart-topic \
+--property print.key=true --property print.value=true \
+--key-deserializer "org.apache.kafka.common.serialization.IntegerDeserializer"
+
+
+#############################################################
+#  PizzaProducer용 Consumer Group 기반의 Consumer              #
+#############################################################
+
+1. Consumer Group id group_01을 가지는 consumer를 3개 생성(아래 명령어 3번 수행) 
+kafka-console-consumer --bootstrap-server localhost:9092 --group group_01 --topic pizza-topic \
+--property print.key=true --property print.value=true \
+--property print.partition=true
+
+#############################################################
+#  Java Client Custom Partitioner 적용                        #
+#############################################################
+
+0. 5개의 파티션을 가지는 pizza-topic-partitioner 토픽 생성. 
+kafka-topics --bootstrap-server localhost:9092 --create --topic pizza-topic-partitioner --partitions 5
+
+1. kafka-dump-log 명령어로 파티션별로 메시지 확인하기
+kafka-dump-log --deep-iteration --files /home/min/data/kafka-logs/pizza-topic-partitioner-0/00000000000000000000.log --print-data-log
+kafka-dump-log --deep-iteration --files /home/min/data/kafka-logs/pizza-topic-partitioner-1/00000000000000000000.log --print-data-log
+
+2. Consumer를 partition 별로 접속하여 확인. --group 인자를 주어서는 안됨. 
+kafka-console-consumer --bootstrap-server localhost:9092 --topic pizza-topic-partitioner \
+--property print.key=true --property print.value=true --partition 0
+
+
+#############################################################
+#   __consumer_offsets 토픽 읽기                               #
+#############################################################
+
+
+1. consumer.config용 config 파일을 생성. 
+echo "exclude.internal.topics=false" > consumer_temp.config
+
+2. __consumer_offsets 토픽을 읽기
+ kafka-console-consumer --consumer.config /home/min/consumer_temp.config \
+ --bootstrap-server localhost:9092 --topic __consumer_offsets \
+ --formatter "kafka.coordinator.group.GroupMetadataManager\$OffsetsMessageFormatter"
+
+
+#############################################################
+#  postgresql에서 orders 테이블 생성                              #
+#############################################################
+
+1. postgres 사용자로 접속하여 postgres db의 public schema에 orders 테이블을 생성
+
+drop table if exists orders;
+
+create table orders 
+ (ord_id varchar(10), shop_id varchar(10), menu_name varchar(100), 
+  user_name varchar(100), phone_number varchar(100), 
+  address varchar(200), order_time timestamp);
+
+
+#############################################################
+#  멀티 노드(브로커)에서 멀티 파티션 및 다중 복제 토픽 생성                   #
+#############################################################
+
+1. 3개의 파티션과 replication factor 3인 토픽 생성. 
+kafka-topics --bootstrap-server localhost:9092 --create --topic topic-p3r3 --partitions 3 --replication-factor 3
+
+2. topic-p3r3 에 producer로 메시지 전송.  
+kafka-console-producer --bootstrap-server localhost:9092 --topic topic-p3r3
+
+3. dump를 이용하여 Leader와 Follower 파티션에 전송된 메시지를 읽어보기 
+kafka-dump-log --deep-iteration --print-data-log --files ~/data/kafka-logs-0?/topic-p3r3-?/00000000000000000000.log
+
+4. replication factor 4인 토픽 생성(에러 발생)
+kafka-topics --bootstrap-server localhost:9092 --create --topic topic-p3r4 --partitions 3 --replication-factor 4
+
+5. 3개의 파티션과 replication factor 2인 토픽 생성.
+kafka-topics --bootstrap-server localhost:9092 --create --topic topic-p3r2 --partitions 3 --replication-factor 2
+
+6. 2개의 파티션과 replication factor 3인 토픽 생성.
+kafka-topics --bootstrap-server localhost:9092 --create --topic topic-p2r3 --partitions 2 --replication-factor 3
+
+
+
+#############################################################
+#  kafka segment와 roll관련 파라미터                              #
+#############################################################
+
+1. pizza-topic-stest 토픽 생성 설정 확인.  
+kafka-topics --bootstrap-server localhost:9092 --create --topic pizza-topic-stest --partitions 3 
+
+2. topic의 segment.bytes 설정을 10k bytes로 변경. 
+kafka-configs --bootstrap-server localhost:9092 --entity-type topics --entity-name pizza-topic-stest --alter --add-config segment.bytes=10240
+
+3. 변경한 topic의 config를 다시 Default값으로 원복
+kafka-configs --bootstrap-server localhost:9092 --entity-type topics --entity-name pizza-topic-stest --alter --delete-config segment.bytes
+
+4. topic의 segment.ms 설정을 60초로 변경. 
+kafka-configs --bootstrap-server localhost:9092 --entity-type topics --entity-name pizza-topic-stest --alter --add-config segment.ms=60000
+
+5. 변경한 topic의 config를 다시 Default값으로 원복
+kafka-configs --bootstrap-server loca로host:9092 --entity-type topics --entity-name pizza-topic-stest --alter --delete-config segment.ms
+
+
+#############################################################
+#  kafka-dump-log 명령어로 세그먼트 log 파일 내부 보기                 #
+#############################################################
+
+1. kafka-dump-log 명령어로 log 파일 내부 보기
+kafka-dump-log --deep-iteration --files /home/min/data/kafka-logs/pizza-topic-stest-0/00000000000000000000.log --print-data-log
+
+2. kafka-dump-log 명령어로 index 파일 내부 보기
+kafka-dump-log --deep-iteration --files /home/min/data/kafka-logs/pizza-topic-stest-0/00000000000000000000.index --print-data-log
+
+3. kafka-dump-log 명령어로 timeindex 파일 내부 보기
+kafka-dump-log --deep-iteration --files /home/min/data/kafka-logs/pizza-topic-stest-0/00000000000000000000.timeindex --print-data-log
+
+
+#############################################################
+#  log.cleanup.policy=delete 기반에서 Segment 삭제 관리           #
+#############################################################
+
+0. pizza-topic-stest 토픽 삭제 후 재 생성. 
+kafka-topics --bootstrap-server localhost:9092 --delete --topic pizza-topic-stest 
+kafka-topics --bootstrap-server localhost:9092 --create --topic pizza-topic-stest --partitions 3
+
+1. broker 레벨에서 log cleanup policy와 retention 관련 파라미터 보기
+kafka-configs --bootstrap-server localhost:9092 --entity-type brokers --entity-name 0 --all --describe | grep policy
+kafka-configs --bootstrap-server localhost:9092 --entity-type brokers --entity-name 0 --all --describe | grep retention
+
+2. pizza-topic-stest 토픽의 retention 관련 파라미터 보기
+kafka-configs --bootstrap-server localhost:9092 --entity-type topics --entity-name pizza-topic-stest --all --describe | grep retention
+
+3. pizza-topic-stest의 segment.bytes를 10k로, retention.ms를 3분으로 변경하기 
+kafka-configs --bootstrap-server localhost:9092 --entity-type topics --entity-name pizza-topic-stest --alter --add-config segment.bytes=10240
+kafka-configs --bootstrap-server localhost:9092 --entity-type topics --entity-name pizza-topic-stest --alter --add-config retention.ms=180000
+
+#############################################################
+#  cleanup.policy=compact 기반에서  Log Compaction 수행          #
+#############################################################
+
+0. pizza-topic-stest 토픽 삭제 후 재 생성. 
+kafka-topics --bootstrap-server localhost:9092 --delete --topic pizza-topic-stest 
+kafka-topics --bootstrap-server localhost:9092 --create --topic pizza-topic-stest --partitions 3
+
+1. broker 레벨에서 log cleanup policy와 cleaner 관련 파라미터 보기
+kafka-configs --bootstrap-server localhost:9092 --entity-type brokers --entity-name 0 --all --describe | grep policy
+kafka-configs --bootstrap-server localhost:9092 --entity-type brokers --entity-name 0 --all --describe | grep cleaner
+
+2. pizza-topic-stest 토픽의 log cleanup policy와 cleaner 관련 파라미터 보기
+kafka-configs --bootstrap-server localhost:9092 --entity-type topics --entity-name pizza-topic-stest --all --describe | grep policy
+kafka-configs --bootstrap-server localhost:9092 --entity-type topics --entity-name pizza-topic-stest --all --describe | grep cleaner
+
+3. pizza-topic-stest 토픽의 segment.bytes를 10k로 변경하기 
+kafka-configs --bootstrap-server localhost:9092 --entity-type topics --entity-name pizza-topic-stest --alter --add-config segment.bytes=10240
+
+4. pizza-topic-stest 토픽의 cleanup.policy를 compact로 변경하고, min.cleanable.dirty.ratio를 0.1로 변경 
+kafka-configs --bootstrap-server localhost:9092 --entity-type topics --entity-name pizza-topic-stest --alter --add-config cleanup.policy=compact
+kafka-configs --bootstrap-server localhost:9092 --entity-type topics --entity-name pizza-topic-stest --alter --add-config min.cleanable.dirty.ratio=0.1
+
+5. log compaction monitoring
+
+while true
+do
+sleep 10
+echo "######## `date` ########"
+ls -lia
+done
