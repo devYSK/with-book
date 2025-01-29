@@ -2375,3 +2375,843 @@ min.insync.replicas를 2로 잡으면 프로듀서들은 3개의 레플리카중
 
 * 링크드인 버로우 도구 확인
 
+
+
+# 8. 정확히 한번 (exactly once)
+
+최소 한번(at least once) 전달하더라도, 메시지 중복의 가능성은 여전히 있다.
+
+이를 막기 위해선 애플리케이션에서 중복 처리를 하던가, exactly once가 필요하다
+
+카프카의 exactly once는 두개의 핵심 기능인 멱등적 프로듀서와 트랜잭션의 조합으로 이루어진다. 
+
+## 멱등적 프로듀서
+
+동일한 작업을 여러번 실행해도 같은 결과가 나오는것을 멱등적이라고 한다.
+
+카프카 멱등적 프로듀서는 자동으로 중복을 탐지하고 처리함으로써 이 문제를 해결한다
+
+### 멱등적 프로듀서의 작동 원리 
+
+멱등적 프로듀서 사용시 모든 메시지는 고유한 프로듀서 ID(Pid), 시퀀스 넘버를 가지게 된다.
+
+대상 토픽 및 파티션과 Pid, 시퀀스넘버를 합치면 메시지의 고유한 식별자가 된다. 
+
+각 브로커는 해당 브로커에 할당된 모든 파티션들에 쓰여진 마지막 5개 메시지들을 추적하기 위해 이 고유 식별자를 사용한다.
+
+* 파티션별로 추적되어야 하는 시퀀스 넘버 수 제한 : max.in.flights.requets.per.connection 
+
+중복된 메시지를 받을 경우 적절한 에러를 발생시키고 메시지를 거부한다. 단 예외가 발생하진 않는다
+
+* 프로듀서에 로깅도 되고 지표값에도 반영은 된다.
+* 프로듀서 클라이언트에서 record-error-rate 지표값을 확인할 수 있고, 브로커에서 RequestMetrics유형의 ErrorsPerSec 지푯값에 기록된다 
+
+브로커는 시퀀스 2 메시지 다음 3 메시지가 올것을 예상하지만 만약 27번 메시지가 오면 out of order sequence number 에러를 발생시킨다. 
+
+* 트랜잭션 기능 없이 멱등적 프로듀서만 쓰면 이 에러는 무시해도 괜찮다 
+
+다른 모든 분산 시스템들과 마찬가지로, 작동이 실패했을 경우 멱등적 프로듀서가 어떻게 처리하는 지를 생각해 보는 것은 의미가 있다. 프로듀서 재시작과 브로커 장애, 두 경우를 생각해 보자.
+
+1. 프로듀서 재시작
+   * 프로듀서 시작시 브로커로부터 프로듀서 ID를 생성받는데, 프로듀서 초기화시마다 새로운 Id가 생성된다.
+   * 즉 새 멱등 프로듀서가 기존 멱등 프로듀서의 메시지를 재전송할 경우, 브로커는 메시지 중복을 알아차리지 못한다 
+2. 브로커 장애시
+   * 토픽의 리더 브로커는 새 메시지가 쓰여질때마다 인-메모리에 저장된 최근 5개의 시퀀스넘버를 업데이트한다. 팔로워 레플리카도 자체적인 인메모리 버퍼를 업데이트 해서 팔로워가 리더가 된 경우 시퀀스를 들고 있어 유효성 검증을 재개할 수 있다.
+   * 그러나 리더 브로커 장애 난 후 다시 리더로 돌아오면 시퀀스가 없다. 
+
+### 멱등적 프로듀서의 한계
+
+멱등적 프로듀서는 재시도가 발생할 경우 생기는 중복만을 방지한다. 동일한 메시지를 두번 호출하면 중복된 메시지가 생긴다. 그러므로 프로듀서 예외를 잡아서 애플리케이션이 직접 재시도 하는것보다 프로듀서에 탑재된 재시도 메커니즘을 이용하는 편이 언제나 더 낫다. 
+
+> 멱등적 프로듀서는 프로듀서 자체 재시도 메커니즘에 의한 중복만을 방지할뿐 그 이상은 하지 않는다. 나머지는 개발자의 몫이다
+
+### 멱등적 프로듀서 사용법
+
+프로듀서 설정에 enable.idempotence=true를 사용하면 끝이다. 
+
+이걸 활성화하면 다음과 같은것들이 바뀐다
+
+* 프로듀서 id를 받아오기 위해 시동과정에서 API를 하나 더 호출
+* 전송되는 각각의 레코드 배치에는 프로듀서 ID와 배치 내 첫 메시지 시퀀스 넘버가 포함된다 .
+  * 프로듀서 ID는 long, 시퀀스 넘버는 integer
+* 브로커들은 모든 프로듀서 인스턴스에서 들어온 레코드 배치의 시퀀스 넘버를 검증해서 메시지 중복을 방지
+
+## 8.2 트랜잭션
+
+트랜잭션은 카프카 스트림즈를 사용하는 애플리케이션에 정확성을 보장하기 위해 도입되었다.
+
+트랜잭션 기능은 스트림을 위해 개발되어서 읽기-처리-쓰기 패턴에서 사용되도록 개발되었다.
+
+ 즉 정확히 한번만 처리하기 위함이다. - exactly once
+
+카프카 트랜잭션은 **idempotent producer**와 **transactional producer** 기능 위에 구현되었다.
+
+- **Idempotent Producer**: 중복된 메시지를 브로커에 보내더라도 중복 메시지가 기록되지 않도록 보장.
+- **Transactional Producer**: 여러 레코드의 처리를 하나의 원자적 단위로 묶어, 전체 성공 또는 전체 실패를 보장.
+
+#### **프로듀서 (Producer)**
+
+1. **트랜잭션 시작**:
+   - `beginTransaction()` 호출로 트랜잭션이 시작됩니다.
+   - 프로듀서는 브로커에 자신의 트랜잭션 ID와 PID를 등록합니다.
+2. **메시지 전송**:
+   - 메시지를 여러 파티션에 전송할 수 있습니다.
+   - 메시지는 "PENDING" 상태로 기록되며, 아직 커밋되지 않은 상태입니다.
+3. **트랜잭션 커밋**:
+   - `commitTransaction()` 호출 시, 브로커는 관련 메시지들을 "COMMITTED" 상태로 변경합니다.
+   - 커밋된 상태는 컨슈머가 읽을 수 있습니다.
+4. **트랜잭션 중단 (Abort)**:
+   - `abortTransaction()` 호출 시, 브로커는 관련 메시지들을 삭제하거나 무시하도록 처리합니다.
+
+#### **브로커 (Broker)**
+
+1. **트랜잭션 상태 관리**:
+   - 브로커는 메시지 상태를 **PENDING**, **COMMITTED**, 또는 **ABORTED**로 관리.
+   - 상태 정보는 내부 토픽 `__transaction_state`에 기록.
+2. **트랜잭션 검증**:
+   - 프로듀서가 메시지를 전송할 때 PID와 트랜잭션 ID를 검증.
+   - 중복 메시지를 방지하기 위해 메시지의 시퀀스 번호를 확인.
+3. **컨슈머에게 메시지 노출**:
+   - 커밋되지 않은 메시지는 컨슈머가 읽지 못하도록 차단.
+   - 커밋된 메시지만 컨슈머에게 노출.
+
+#### **컨슈머 (Consumer)**
+
+1. **트랜잭션 메시지 읽기**:
+   - 컨슈머는 기본적으로 **읽을 수 있는 상태(COMMITTED)**의 메시지만 읽습니다.
+   - `isolation.level`을 `read_committed`로 설정해야 트랜잭션 메시지에 대한 정확성을 보장.
+2. **중복 방지**:
+   - 컨슈머는 자신의 오프셋 정보를 기반으로 메시지를 읽기 때문에 중복 처리 방지.
+
+### **3. 데이터 동작 방식**
+
+#### 예시: 트랜잭션 프로듀서 시나리오
+
+1. **시작 상태**:
+
+   - 프로듀서가 트랜잭션 ID = `tx1`로 `beginTransaction()`을 호출.
+
+   - 브로커는 __transaction_state에 아래와 같은 초기 상태를 기록:
+
+     ```plaintext
+     tx1: PENDING
+     ```
+
+2. **메시지 전송**:
+
+   - topic-A 의 파티션 0과 1에 메시지 전송:
+
+     ```plaintext
+     topic-A-0: PENDING - 메시지 A1
+     topic-A-1: PENDING - 메시지 A2
+     ```
+
+3. **트랜잭션 커밋**:
+
+   - 프로듀서가 `commitTransaction()` 호출.
+
+   - 브로커는 
+
+     ```
+     __transaction_state
+     ```
+
+     를 갱신하고 메시지를 COMMITTED 상태로 변경:
+
+     ```plaintext
+     __transaction_state:
+     tx1: COMMITTED
+     
+     topic-A-0: COMMITTED - 메시지 A1
+     topic-A-1: COMMITTED - 메시지 A2
+     ```
+
+4. **컨슈머 행동**:
+
+   - `isolation.level=read_committed`로 설정된 컨슈머는 COMMITTED 메시지(A1, A2)만 읽음.
+
+5. **트랜잭션 중단 시**:
+
+   - 프로듀서가 `abortTransaction()` 호출.
+
+   - 브로커는 메시지를 무효화하고 상태를 갱신:
+
+     ```plaintext
+     __transaction_state:
+     tx1: ABORTED
+     
+     topic-A-0: ABORTED - 메시지 A1
+     topic-A-1: ABORTED - 메시지 A2
+     ```
+
+------
+
+### **4. Exactly Once 보장 원리**
+
+1. **Idempotency**:
+   - 프로듀서의 PID와 메시지 시퀀스 번호를 활용해 중복 전송 방지.
+2. **트랜잭션 상태 관리**:
+   - 트랜잭션 상태를 `__transaction_state`에 기록하여 메시지 상태를 명확히 구분.
+3. **컨슈머 읽기 정책**:
+   - `read_committed` 설정으로 커밋된 메시지만 읽음.
+4. **에러 복구**:
+   - 프로듀서 충돌 발생 시 트랜잭션 복구 가능. 브로커는 `__transaction_state`를 기반으로 PENDING 상태를 ABORTED로 처리.
+
+------
+
+### **5. 실제 예시**
+
+#### **상황**: 은행 계좌 이체
+
+1. 트랜잭션 ID: `tx_bank123`
+2. 액션:
+   - `topic-accounts`: 파티션 0에 `UserA: -$100`
+   - `topic-accounts`: 파티션 1에 `UserB: +$100`
+
+#### **정상 흐름**
+
+- 프로듀서가 commitTransaction()
+
+   호출 시:
+
+  - `UserA`의 기록이 `COMMITTED`로 변경.
+  - `UserB`의 기록이 `COMMITTED`로 변경.
+
+- 컨슈머가 정확한 잔액을 읽음.
+
+#### **비정상 흐름**
+
+- 프로듀서 충돌 시:
+  - 브로커가 PENDING 메시지를 ABORTED 상태로 변경.
+  - 컨슈머는 무효화된 메시지를 읽지 않음.
+
+### **6. 결론**
+
+카프카 트랜잭션은 메시지 상태(PENDING, COMMITTED, ABORTED)를 관리하여 중복 전송 및 메시지 손실을 방지하며, **Exactly Once**를 보장합니다. 이를 통해 금융 시스템이나 데이터 파이프라인 등 높은 신뢰성이 요구되는 환경에서 안정적으로 사용할 수 있습니다.
+
+### 트랜잭션이 해결하는 문제
+
+단순한 스트림 처리 애플리케이션을 하나 생각해 보자. 즉, 원본 토픽으로부터 이벤트를 읽어서, (아 마도) 처리를 한 다음, 결과를 다른 토픽에 쓴다. 우리가 처리하는 각 메시지에 대해 결과가 정확히 한 번만 쓰여지도록 하고 싶다. 무엇이 잘못될 수 있을까?
+
+1. 애플리케이션 크래시로 인한 재처리 
+   * 출력 토픽에 출력했는데 입력 오프셋은 커밋되기 전 애플리케이션이 크래시나면?
+   * 하트비트가 끊어지면서 리밸런스가 발생하고 파티션들은 다른 컨슈머로 재할당되면서 과거 커밋된 오프셋으로부터 다시 읽으면서 중복이 발생한다
+2. 좀비 애플리케이션에 의해 발생하는 재처리 : 레코드 배치를 읽어온 후 연결이 끊어진다면?
+   * 애플리케이션은 죽은것으로 간주되고 파티션들은 다른 컨슈머들에게 재할당됌.
+   * 그사이 죽었다고생각했던 인스턴스가 작동하면 중복이 발생 
+
+### 카프카 트랜잭션이 어떻게 정확히 한번을 보장하는가
+
+읽어온 원본 메시지의 오프셋이 커밋되고 결과가 성공적으로 쓰여지거나, 둘다 안일어나거나 하는 보장이 필요하다.
+
+이것을 원자적 다수 파티션 쓰기 기능을 도입하여, 오프셋을 커밋하는 것과 결과를 쓰는것은 두랃 파티션에 메시지를 쓰는 과정을 수반한다에 착안한것이다.
+
+트랜잭션 을 사용하려면 트랜잭션 프로듀서를 사용해야 한다.
+
+### 1. 트랜잭션적 프로듀서 vs 일반 프로듀서
+
+- **일반 프로듀서**: 메시지를 카프카에 보낼 때 자동으로 생성되는 `producer.id`를 사용합니다. 이 ID는 프로듀서가 재시작되면 변경될 수 있습니다.
+- **트랜잭션적 프로듀서**: `transactional.id`라는 고정된 ID를 설정하고, `initTransactions()` 메서드를 호출하여 초기화합니다. 이 ID는 프로듀서가 재시작되어도 유지되며, 브로커는 이 ID를 통해 동일한 프로듀서를 식별합니다.
+
+### 2. 트랜잭션적 프로듀서의 주요 기능
+
+- **원자적 쓰기**: 여러 파티션에 걸쳐 데이터를 원자적으로 쓸 수 있습니다. 즉, 모든 쓰기가 성공하거나 모두 실패하게 보장합니다.
+- **프로듀서 식별 유지**: `transactional.id`를 사용하여 프로듀서가 재시작되더라도 동일한 `producer.id`를 유지합니다. 이를 통해 중복된 프로듀서가 생성되는 것을 방지합니다.
+
+### 3. 좀비 펜싱(Zombie Fencing)
+
+- **문제점**: 애플리케이션의 이전 인스턴스(좀비)가 여전히 프로듀서를 사용하려고 할 때 중복 기록이 발생할 수 있습니다.
+
+- 해결 방법 epoch 라는 개념을 사용합니다. 프로듀서가  initTransactions() 를 호출하면  transactional.id
+
+  에 해당하는  epoch값이 증가합니다.
+
+  - **새로운 프로듀서**: 높은 `epoch` 값을 가지므로 정상적으로 메시지를 보냅니다.
+  - **오래된 프로듀서**: 낮은 `epoch` 값을 가지므로 `FencedProducer` 에러가 발생하며 메시지 전송이 거부됩니다. 이렇게 하면 좀비 프로듀서가 중복으로 데이터를 쓰는 것을 방지할 수 있습니다.
+
+### 4. 카프카 2.5 이후의 개선 사항
+
+- **컨슈머 그룹 메타데이터 추가**: 트랜잭션 메타데이터에 컨슈머 그룹 메타데이터가 포함되어, 서로 다른 `transactional.id`를 가진 프로듀서들이 동일한 파티션에 안전하게 데이터를 쓸 수 있게 되었습니다.
+
+### 5. 트랜잭션과 컨슈머의 격리 수준(Isolation Level)
+
+트랜잭션을 통해 쓰여진 메시지를 어떻게 읽을지 설정할 수 있습니다. 이는 컨슈머의 `isolation.level` 설정으로 제어됩니다.
+
+- read_committed (읽기 커밋됨)
+  - **동작 방식**: 커밋된 트랜잭션의 메시지만 읽습니다. 중단된 트랜잭션이나 아직 커밋되지 않은 메시지는 읽지 않습니다.
+  - **장점**: '정확히 한 번'의 메시지 처리를 보장받을 수 있습니다.
+  - **주의 사항**: 특정 트랜잭션의 모든 메시지가 보장되지는 않으며, 트랜잭션에 포함된 모든 파티션을 구독해야 완전한 메시지를 받을 수 있습니다.
+- read_uncommitted (읽기 미커밋됨, 기본값)
+  - **동작 방식**: 모든 메시지를 읽습니다. 커밋되지 않은 트랜잭션의 메시지나 중단된 트랜잭션의 메시지도 포함됩니다.
+  - **장점**: 메시지 지연 없이 빠르게 읽을 수 있습니다.
+  - **단점**: 중복 메시지나 불완전한 데이터가 포함될 수 있습니다.
+
+### 6. 메시지 읽기 순서와 Last Stable Offset (LSO)
+
+- **read_committed 모드**에서는 **Last Stable Offset (LSO)** 이후에 작성된 메시지는 아직 트랜잭션이 완료되지 않았을 수 있어 읽히지 않습니다.
+- 트랜잭션이 커밋되거나 중단될 때까지 또는 `transaction.timeout.ms` 설정 시간(기본값: 15분)이 지나야 LSO가 업데이트됩니다.
+- **문제점**: 트랜잭션이 오랫동안 열려 있으면 컨슈머가 메시지를 읽는 데 지연이 발생할 수 있습니다.
+
+![image-20250102150916527](./images//image-20250102150916527.png)
+
+### 트랜잭션으로 해결할 수 없는 문제들
+
+트랜잭션 기능은 다수의 파티션에 대한 원자적 쓰기를 제공하고 스트림 처리 애플리케이션에서 좀비 프로듀서를 방지하기 위한 목적으로 추가되었다. 
+
+
+
+데이터베이스에서 읽어서 카프카에 쓰고, 다시 다른데이터베이스 쓰는 경우에도 이 완전한 트랜잭션을 보장하지않는다.
+
+### 트랜잭션의 작동 원리
+
+트랜잭션의 기본적인 알고리즘은 찬디-램포트 스냅샷 알고리즘의 영향을 받았다
+
+* 찬디-램포트 스냅샷 알고리즘은 **분산 시스템**에서 전체 시스템의 상태를 기록하기 위해 사용하는 **스냅샷(snapshot)** 알고리즘
+
+* 이 알고리즘은 통신 채널과 노드가 비동기적으로 동작하는 환경에서도 일관된 시스템 상태를 캡처할 수 있도록 설계되었습니다. **글로벌 일관된 상태 (global consistent state)**를 기록하는 것이 목표입니다.
+
+* 시스템 구성 
+
+  - 3개의 노드: P1, P2, P3 
+  - 각 노드 간 채널:  C(1-2), C(1-3), C(2-1), C(2-3), C(3-1), C(3-2) 
+  - 동작 시나리오 
+
+  1. P1이 스냅샷을 시작:
+     - P1은 자신의 상태를 기록: **S1**.
+     - P1은 P2,P3로 마커 메시지 전송.
+  2. P2에서 마커 메시지 수신:
+     - 마커를 처음 받았으므로 자신의 상태 S2를 기록.
+     - 마커를 보내기 전 C(1-2), (C3-2) 채널의 상태를 기록.
+  3. P3에서 마커 메시지 수신:
+     - 마찬가지로 자신의 상태 S3를 기록.
+     - 채널 상태 C((1-3), C(2-3) 기록 
+
+  #### **결과**
+
+  - P1,P2,P3P1, P2, P3P1,P2,P3 각각의 상태가 기록되고, 각 채널에서 주고받은 메시지도 정확히 기록됨.
+
+이 알고리즘은, 통신 채널을 통해 marker라 불리는 컨트롤 메시지를 보내고 이 마커 메시지의 도착을 기준으로 일관적인 상태를 결정한다.
+
+카프카의 트랜잭션은 다수의 파티션에 대해 트랜잭션이 커밋되었거나 중단되었다는 것을 표시하게 위해 마커 메시지를 사용한다. 
+
+일부 파티션에서만 커밋 메시지가 쓰여진 상태를 해결하기 위해 2단계 커밋과 트랜잭션 로그를 사용해 이 문제를 해결한다
+
+1. 현재 진행중인 트랜잭션이 존재함을 로그에 기록, 연관된 파티션들도 함께 기록
+2. 로그에 커밋 혹은 중산 시도 기록
+3. 모든 파티션에 트랜잭션 마커를 사용
+4. 트랜잭션이 종료되었음을 로그에 씀
+
+이걸 위해 __transaction_state라는 이름의 내부 토픽을 사용한다.
+
+1. 트랜잭션 시작 전 initTransaction()을 호출해서 자신이 트랜잭션 프로듀서임을 기록해야 한다.
+   * 이 요청은 트랜잭션 코디네이터 역할을 맡은 브로커에게 보내짐
+
+2. beginTransaction()을 호출
+   * 브로커에 AddPartitionsToTxn요청을 보냄으로써 트랜잭션이 있다고 알림
+3. 쓰기작업이 완료되고 커밋준비 되면 트랜잭션에서 처리한 레코드들의 오프셋부터 커밋
+   * sendOffsetsToTransacton()을 호출시 트랜잭션 코디네이터로 오프셋과 컨슈머 그룹 ID가 포함된 요청이 전송 
+
+만약 트랜잭션이 | transaction.timeout.ms에 설정된 시간 내에 커밋되지도, 중단되지도 않는다면, 트랜잭션 코디네이터는 자동으로 트랜잭션을 중단한다.
+
+* transactional.id.expiration.ms 옵션은 시퀀스 넘버, 오프셋 등을 저장하는데 기본값은 7일이다. 오랫동안 안지우게 되면 메모리가 모자르므로 빨리 만료되도록 하여 지우도록 하는것이 좋다
+
+## 트랜잭션 성능
+
+트랜잭션 사용시 오버헤드 발생시킨다
+
+* 트랜잭션마다 파티션을 등록하는 파티션별로 호출
+* 파티션마다 커밋 마커 메시지 
+
+트랜잭션 이닛 - 커밋은 동기적으로 작동하기 때문에 성공적으로 완료되거나 실패하거나 타임아웃 될떄까지 ㅇ떤 데이터도 전송되지 않는다.
+
+트랜잭션 오버헤드는, 트랜잭션에 포함되는 메시지 수와는 무관해서 트랜잭션마다 많은 수의 메시지를 넣는것이 상대적으로 오버헤드가 적다.
+
+
+
+컨슈머쪽에서의 오버헤드
+
+* read_committed 모드 컨슈머에서, 완료되지 않은 트랜잭션의 레코드는 리턴되지 않음.
+
+트랜잭션 커밋 사이의 간격이 길어질수록 컨슈머는 더 오래 기다려야함. 
+
+멱등 적 프로듀서는 재시도 메커니즘에 의해 발생하는 메시지 중복을 방지한다. 
+
+트랜잭션은 카프카 스트 림즈에 있어서의 '정확히 한 번' 보장의 기반이 된다.
+
+이 두 가지는 간단한 설정만으로도 사용이 가능하며, 더 중복이 적고 더 강력한 정확성 보장이 필요 한 애플리케이션을 개발할 때 카프카를 사용할 수 있게 해준다.
+
+
+
+# 9. 데이터 파이프라인 구축하기
+
+## 데이터 파이프라인 구축시 고려사항
+
+### 9.1.1 적시성
+
+카프카는 실시간으로 작동하는 데이터 파이프라인에서부터 일 단위로 작동하는 배치 작업에 이르는 모든 작업에 사용될 수 있다. 쓰는쪽에서는 실시간으로 쓰지만 읽는쪽에서 마음대로 쓸 수 있기때문에 백프레셔 적용도 쉬워진다
+
+### 9.1.2 신뢰성
+
+카프카는 자체적으로 최소 한번 전달을 보장하며, 외부 데이터저장소와 결합됐을 때 정확히 한번까지도 보장이 가능하다. 
+
+### 데이터 형식
+
+카프카와 커넥트 API는 데이터 형식에 독립적이다. 카프카 커넥트는 어떠한 형식으로도 저장가능하도록 plugin을 지원한다. 
+
+### 변환
+
+데이터 파이프라인을 구축하는 방식에는 2가지 방식이 있다.
+
+ETL과 ELT
+
+* ETL : 추출-변환-적재 
+* ELT - 추출-적재-변환 
+
+## 카프카 커넥트 vs 프로듀서/컨슈머
+
+카프카 커넥트는 카프카를 직접 코드가 API를 작성하지 않고 변경도 할 수 없는 데이터 저장소에 연결시켜야 할 때 쓴다. 각 저장소에 맞는 커넥터를 사용하면 된다. 대부분 구현되어 있으며, 커넥터가 없다면 커넥트 API를 이용해 직접 구현할 수 있다.
+
+## 카프카 커넥트
+
+카프카 커넥트는 카프카의 일부로, 카프카와 다른 데이터 저장소 사이에 확장성과 신뢰성을 가지면서 데이터를 주고받을 수 있는 수단을 제공한다. 카프카 커넥트는 여러 워커 프로세스들의 클러스터 형태로 실행. 사용자는 워커에 커넥터 플러그인을 설치한 뒤 REST API를 사용해서 커넥터별 설정을 잡아주거나 관리해주면 된다.
+
+### 카프카 커넥트 실행하기
+
+카프카 커넥트는 아파치 카프카에 포함되어 배포되므로 별도로 설치할 필요는 없다.
+
+단, 프로덕션 환경에서 사용할 경우 브로커와는 별도의 서버에서 커넥트를 실행시켜야 한다. 
+
+커넥트 워커 실행시키는 것은 브로커 실행과 비슷하다
+
+```
+bin/connect-distributed.sh config/connect-distributed.properties
+```
+
+`config/connect-distributed.properties` 파일을 수정
+
+```
+# Kafka 브로커 연결 정보
+bootstrap.servers=localhost:9092
+
+# Kafka Connect 클러스터 ID
+group.id=connect-cluster
+
+# 상태 저장용 Kafka 토픽 설정
+config.storage.topic=connect-configs
+offset.storage.topic=connect-offsets
+status.storage.topic=connect-statuses
+
+# JSON 컨버터 설정
+key.converter=org.apache.kafka.connect.json.JsonConverter
+value.converter=org.apache.kafka.connect.json.JsonConverter
+key.converter.schemas.enable=false
+value.converter.schemas.enable=false
+
+# 플러그인 경로
+plugin.path=/path/to/connect-plugins
+```
+
+* bootstrap.servers : 커넥트와 작동하는 브로커 목록. 최소 3개 이상이 권장
+* group.id : 동일한 그룹 id를 갖는 모든 워커들은 같은 커넥트 클러스터 구성
+* plugin.path : 커넥터 컨터버 트랜스포메이션 등을 다운로드 받아서 플러그인 할 수 있음.
+  * 커넥터 jar 파일을 지정한 디렉토리 아래에 추가 
+* key, value.converter : 컨버터 설정. 기본은 JSON. 
+* rest.host.name, rest.port : 커넥터 설정 및 모니터링할 때의 커넥트 REST API
+  * curl 카프카호스트/connector-plugins 호출시 목록 확인 가능 
+
+
+
+독립 실행 모드로 하려면 connect-standalone.sh를 시켜주면 된다.
+
+커넥터 도커컴포즈
+
+```
+version: '3.8'
+
+services:
+  kafka-connect:
+    image: confluentinc/cp-kafka-connect:latest
+    container_name: kafka-connect
+    ports:
+      - "8083:8083"  # Kafka Connect REST API 포트
+    environment:
+      # Kafka 클러스터의 내부 브로커 주소
+      CONNECT_BOOTSTRAP_SERVERS: "kafka1:29091,kafka2:29092,kafka3:29093"
+
+      # Kafka Connect 그룹 ID
+      CONNECT_GROUP_ID: "kafka-connect-group"
+
+      # Kafka Connect 설정 및 상태 토픽
+      CONNECT_CONFIG_STORAGE_TOPIC: "connect-configs"
+      CONNECT_OFFSET_STORAGE_TOPIC: "connect-offsets"
+      CONNECT_STATUS_STORAGE_TOPIC: "connect-status"
+
+      # Kafka Connect 변환기 설정 (예: JSON)
+      CONNECT_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_INTERNAL_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_INTERNAL_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+
+      # REST API 포트
+      CONNECT_REST_PORT: 8083
+
+#      # 플러그인 경로 (커넥터 플러그인을 추가할 경우 사용)
+      CONNECT_PLUGIN_PATH: "/usr/share/java,/etc/kafka-connect/jars,/usr/share/filestream-connectors,/home/appuser/connectors"
+
+      # 자동 생성 토픽 사용
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_REST_ADVERTISED_HOST_NAME: "kafka-connect"
+      # 추가 옵션 (필요 시 설정)
+      # 예: 기본 작업자 수, 스레드 수 등
+      # CONNECT_WORKER_COUNT: 1
+      # CONNECT_TASKS_MAX: 1
+    volumes:
+      - ./connect-plugins:/home/appuser/connectors
+
+    networks:
+      - kafka-net
+
+networks:
+  kafka-net:
+    external:
+      name: kafka-example_kafka-net
+
+```
+
+* 파일스트림 커넥터 : https://docs.confluent.io/platform/current/connect/filestream_connector.html?utm_medium=sem&utm_source=google&utm_campaign=ch.sem_br.nonbrand_tp.prs_tgt.dsa_mt.dsa_rgn.apac_lng.eng_dv.all_con.docs&utm_term=&creative=&device=c&placement=&gad_source=1&gclid=Cj0KCQiAj9m7BhD1ARIsANsIIvDrufPIA3TGKJf1psPaoMcaTdyZ0gwoV3wio2qeNSUlkjSyykgkS9caAvBREALw_wcB
+
+
+
+커넥트 생성 요청
+
+```
+echo '{"name": "load-kafka-config", "config": {"connector.class": "FileStreamSource", "file": "/etc/kafka/server.properties", "topic": "kafka-config-topic"}}' |
+curl -X POST -d @- http://localhost:8083/connectors \
+-H "Content-Type: application/json"
+'{
+  "name": "load-kafka-config",
+  "config": {
+    "connector.class": "FileStreamSource",
+    "file": "/etc/kafka/server.properties",
+    "topic": "kafka-config-topic",
+    "name": "load-kafka-config"
+  },
+  "tasks": [
+    {
+      "connector": "load-kafka-config",
+      "task": 0
+    }
+  ],
+  "type": "source"
+}'
+```
+
+컨슈머
+
+```
+docker exec -it kafka1 kafka-console-consumer --bootstrap-server=localhost:9092 --topic kafka-config-topic --from-beginning
+
+```
+
+이제 파일로 내보내려면?
+
+```
+echo '{
+  "name": "dump-kafka-config",
+  "config": {
+    "connector.class": "FileStreamSink",
+    "file": "copy-of-server-properties",
+    "topics": "kafka-config-topic"
+  }
+}' | curl -X POST \
+  -d @- http://localhost:8083/connectors \
+  --header "Content-Type: application/json"
+
+```
+
+삭제
+
+```
+ curl -X delete http://localhost:8083/connectors/dump-kafka-config
+```
+
+
+
+### JDBC 소스 커넥터
+
+* https://kafka.apache.org/documentation/#connectconfigs
+
+이거보단 CDC를 이용하는게 더효율적이긴 하다.
+
+* debezium project
+
+
+
+### 카프카 데드레더 큐
+
+* https://confluent.io/blog/kafka-connect-deep-dive-error-handling-dead-letter-queues
+
+
+
+# 10장 클러스터간 데이터 미러링하기
+
+- 스킵
+
+
+
+# 11장 보안
+
+## 카프카 보안 프로토콜
+
+TLS와 SASL을 사용해서 4개의 보안 프로토콜을 지원한다
+
+카프카 보안 프로토콜은 PLAINTEXT, SSL과 SSl, SSAL을 조합해서 정의된다
+
+* PLAINTEXT : 인증이 존재하지 않음
+* SSL : 선택적으로 SSL 인증 수행
+* SASL_PLAINTEXT : SASL과 PLAINTEXT가 합쳐짐. 암호화는 지원 안하므로 사설 네트워크안에서 적합
+* SASL_SSL : SASL인증과 SSL이 합쳐짐. 암호화 및 인증도 지원
+
+* 리스너 설정이 PLAINTEXT:/로 시작할 경우, SSL 암호화와 SASL 인증을 둘 다 사용하지 않는다. (기본값)
+
+*  SSL:/로 시작할 경우, SSL 암호화는 적용하지만 SASL 인증 기능은 사용하지 않는다.
+
+*  SASL_PLAINTEXT://로 시작할 경우, SSL 암호화는 사용하지 않지만 SASL 인증 기능은 사용한다.
+
+*  SASL_SSL://로 시작할 경우, SSL 암호화와 SASL 인증 기능을 둘 다 사용한다.
+
+inter.broker.listener.name나 security.inter.broker.protocol 설정을 사용해서 브로커간의 통신에서 사용되는 리스너를 설정할 수 있다.
+
+## 인증
+
+카프카는 클라이언트의 신원을 나타내기 위해 KafkaPrincipal 객체를 사용한다.
+
+익명의 경우 User;ANONYMOUS로 사용되며 PLAINTEXT 혹은 SSL로 접속했지만 인증하지 않은 클라이언트에게 적용된다
+
+### SASL
+
+GSSAPI
+
+SASL/GSSAPI를 사용하는 케르베로스 인증이 지원되며, Active Directory나 OpenLDAP와 같은 케르베로스 서버와 통합하는 데 사용될 수 있다.
+
+PLAIN
+
+사용자 이름/비밀번호 인증. 보통 외부 비밀번호 저장소를 사용해서 비밀번호를 검증하는 서버측 커스텀 콜백과 함께 사용된다.
+
+SCRAM-SHA-256 and SCRAM-SHA-512
+
+추가적인 비밀번호 저장소 같은 것을 설정할 필요 없이 카프카를 설치하자마자 바로 사용할 수 있 는 사용자 이름/비밀번호 인증.
+
+OAUTHBEARER
+
+OAuth bearer 토큰을 사용한 인증. 보통 표준화된 OAuth 서버에서 부여된 토큰을 추출하고 검증 하는 커스텀 콜백과 함께 사용된다.
+
+
+
+
+
+#### SASL/PLAIN 설정
+
+JAAS설정을 비밀번호 저장소로서 사용. 
+
+```
+sasl.enabled.mechanisms=PLAIN
+sasl.mechanism.inter.broker.protocl=PLAIN
+listener.name.external.plain.sasl.jaas.config=\
+  org.apache.kafka.common.security.plain.PlainLoginModule required \
+  username="kafka" password="kafka-apssword" \
+  user_kafka="kafka-password" \
+  user_Alice="Alice-password"
+```
+
+클라이언트 설정
+
+```
+sasl.mechanism=PLAIN
+sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule \
+required username="Alice" password="Alice-password";
+```
+
+
+
+모든 브로커의 JAAS 설정에 모든 비밀번호를 저장하는 기본 구현은 안전하지 않을 뿐더러 유연성도 떨어진다. 사용자를 추가하거나 제거할 때마다 모든 브로커를 재시작해야 하기 때문이다. 프로덕션 환경에서 SASL/PLAIN을 사용한다면, 브로커와 서드파티 비밀번호 서버를 통합하기 위해 커스텀 서 버 콜백 핸들러를 사용할 수 있다.
+
+```java
+import java.util.*;
+
+public class PasswordVerifier extends PlainServerCallbackHandler {
+    // 비밀번호 파일 경로를 저장하는 리스트
+    private final List<String> passwdFiles = new ArrayList<>();
+
+    @Override
+    public void configure(Map<String, ?> configs, String mechanism, List<AppConfigurationEntry> jaasEntries) {
+        // JAAS 옵션에서 비밀번호 파일 경로를 읽어와 리스트에 추가
+        Map<String, ?> loginOptions = jaasEntries.get(0).getOptions();
+        String files = (String) loginOptions.get("password.files");
+        Collections.addAll(passwdFiles, files.split(","));
+    }
+
+    @Override
+    protected boolean authenticate(String user, char[] password) {
+        // 모든 비밀번호 파일에 대해 인증 시도
+        return passwdFiles.stream()
+                .anyMatch(file -> authenticate(file, user, password));
+    }
+
+    private boolean authenticate(String file, String user, char[] password) {
+        try {
+            // htpasswd 명령어를 사용하여 사용자 인증 수행
+            String cmd = String.format("htpasswd -vb %s %s %s", 
+                    file, user, new String(password));
+            return Runtime.getRuntime().exec(cmd).waitFor() == 0;
+        } catch (Exception e) {
+            // 인증 중 예외 발생 시 false 반환
+            return false;
+        }
+    }
+}
+```
+
+이후 브로커에 등록한다
+
+```
+listener.name.external.plain.sasl.jaas.config=\
+  org.apache.kafka.common.security.plain.PlainLoginModule required \
+  password.files="/path/to/htpassword.props,/path/to/oldhtpassword.props";
+
+listener.name.external.plain.sasl.server.callback.handler.class=\
+  com.example.PasswordVerifier
+```
+
+클라이언트 쪽에서는 org.apache.kafka.common.security.auth.AuthenticateCallbackHandler 인터페이스를 구현하는 클라이언트 콜백 핸들러를 사용할 수 있다. 이 방법을 사용하면 실행 초기에 JAAS 설정을 정적으로 읽어오는 대신, 실행 도중 실제로 연결이 맺어졌을 때 동적으로 비밀번호를 읽어오도록 할 수 있다.
+
+
+
+# 12장 카프카 운영하기
+
+## 토픽
+
+### 새 토픽 생성하기
+
+```
+kafka-topics --bootstrap-server="localhost:9092" --create \
+--topic name \
+--replication-factor n \
+--partitions n \
+```
+
+* 토픽 이름은 영문 숫자 _ - . 를 쓸 수 있지만 ., __ 은권장되지 않는다 내부적으로 . 을 _로  바꾸기 때문
+
+### 토픽 목록 조회
+
+```
+kafka-topics --bootstrap-server="localhost:9092" --list
+```
+
+### 토픽 상세 조회
+
+```
+kafka-topics --bootstrap-server="localhost:9092" --describe --topic my-topic
+```
+
+### 파티션 추가
+
+```
+kafka-topics --bootstrap-server="localhost:9092" --alter --topic my-topic --partitions 16
+```
+
+### 파티션 삭제
+
+파티션 삭제는 지원되지 않아서 토픽을 삭제하고 다시 만들거나 새버전의 토픽을 만들어서 트래픽을 몰아주는것이 좋다
+
+
+
+### 토픽 삭제
+
+```
+afka-topics --bootstrap-server localhost:9092 --delete --topic my-topic
+```
+
+* 삭제 작업은 비동기. 오래걸리는 작업이다.
+* 삭제 확인혀려면 --describe 옵션사용해서 조회해야한다
+
+## 컨슈머 그룹
+
+### 컨슈머 그룹 목록 및 상세 내역 조회하기
+
+```
+kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list
+```
+
+상세정보
+
+```
+kafka-consumer-groups.sh --bootstrap-server localhost:9092 --describe --group my-consumer
+```
+
+| **필드**           | **설명**                                                     |
+| ------------------ | ------------------------------------------------------------ |
+| **GROUP**          | 컨슈머 그룹의 이름.                                          |
+| **TOPIC**          | 읽고 있는 토픽의 이름.                                       |
+| **PARTITION**      | 읽고 있는 파티션의 ID.                                       |
+| **CURRENT-OFFSET** | 컨슈머 그룹이 이 파티션에서 다음번에 읽어올 메시지의 오프셋. 이 파티션에서의 컨슈머 위치. |
+| **LOG-END-OFFSET** | 브로커 토픽 파티션의 하이 워터마크 오프셋 현재값. 이 파티션에 쓰여질 다음번 메시지의 오프셋. |
+| **LAG**            | 컨슈머의 CURRENT-OFFSET과 브로커의 LOG-END-OFFSET 간의 차이. |
+| **CONSUMER-ID**    | 설정된 client-id 값을 기준으로 생성된 고유한 consumer-id.    |
+| **HOST**           | 컨슈머 그룹이 읽고 있는 호스트의 IP 주소.                    |
+| **CLIENT-ID**      | 컨슈머 그룹에서 속한 클라이언트를 식별하기 위해 클라이언트에 설정된 문자열. |
+
+### 컨슈머 그룹 삭제
+
+```
+kafka-consumer-groups.sh --bootstrap-server localhost:9092 --delete --group my-consumer
+```
+
+이 작업을 수행하려면 컨슈머 그룹 내 모든 컨슈머가 다운 되고 활동중인 멤버가 없어야 한다.
+
+### 오프셋 관리
+
+1. 오프셋 내보내기
+
+```
+kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+  --export --group my-consumer --topic my-topic \
+  --reset-offsets --to-current --dry-run > offsets.csv
+```
+
+* 토픽이름,파티션번호,오프셋 형태로 나온다 
+* --dry-run 없이 실행하면 오프셋이 완전히 리셋되니 주의할것
+
+2. 오프셋 가져오기
+
+현재 오프셋을 설정한다. 컨슈머를 먼저 중단 시키는것이 좋다
+
+```
+kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
+  --reset-offsets --group my-consumer \
+  --from-file offsets.csv --execute
+```
+
+
+
+# 13 카프카 모니터링 하기
+
+## 지표 기초
+
+카프카의 모든 지표값은 JMX 인터페이스를 통해 사용할 수 있다.
+
+용어 정리
+
+* SLI : 서비스 수준 지표. 서비스 신뢰성. 성공적인 비율 ex p99
+  * 종류 : 레이턴시, 퀄리티, 시큐리티, 쓰루풋 
+* SLT : 서비스 수준 한계. SLI와 비슷함 99.9%
+
+카프카 자체를 모니터링하는데 동일한 시스템을 쓰면 장애 발생시, 모니터링 데이터도 오류가 생기므로 다른 별도의 시스템을 쓰는것이 좋다
+
+### 클러스터 문제 진단하기
+
+- ﻿﻿단일 브로커에서 발생하는 문제
+- ﻿﻿과적재된 클러스터에서 발생하는 문제
+- ﻿﻿컨트롤러 문제
