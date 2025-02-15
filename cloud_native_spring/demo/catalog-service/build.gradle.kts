@@ -17,10 +17,10 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.cloud:spring-cloud-starter-config")
     implementation("org.springframework.retry:spring-retry")
-    // https://mvnrepository.com/artifact/org.flywaydb/flyway-core
-    implementation("org.flywaydb:flyway-core:10.20.1")
-    // https://mvnrepository.com/artifact/org.flywaydb/flyway-database-postgresql
-    runtimeOnly("org.flywaydb:flyway-database-postgresql:10.20.1")
+//    // https://mvnrepository.com/artifact/org.flywaydb/flyway-core
+//    implementation("org.flywaydb:flyway-core:10.20.1")
+//    // https://mvnrepository.com/artifact/org.flywaydb/flyway-database-postgresql
+//    runtimeOnly("org.flywaydb:flyway-database-postgresql:10.20.1")
 
 //    implementation("org.springframework.boot:spring-boot-starter-security:3.3.5")
 
