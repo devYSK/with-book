@@ -1,0 +1,1004 @@
+[ 4장. SQL Execution ]
+
+
+ 1. Cost Based Optimizer 
+
+  1.1 CBO Cost 
+
+• cost 설정 값 조회하기
+ select name, setting 
+ from pg_settings where name in('seq_page_cost', 'random_page_cost', 'cpu_tuple_cost', 'cpu_index_tuple_cost', 'cpu_operator_cost');
+
+• Seq Scan Cost 
+ drop table t1;
+ create table t1(c1 integer, c2 integer, c3 integer);
+ 
+ insert into t1 
+ select  c1,(c1%100)+1,(c1%4)+1
+ from generate_series(1,10000) as c1 ;
+ analyze t1;
+ explain select * from t1;
+ 
+ select relpages,reltuples
+ from pg_catalog.pg_class where relname ='t1';
+ SELECT(relpages * 1)        -- 총 Block을 처리하는 I/0 비용 추정 치
+      + (reltuples * 0.01)   -- 행을 처리하는 CPU 비용 추정 치    
+ FROM pg_class WHERE relname = 't1';
+ 
+ explain  
+ select * from t1 where c1 > 6000;
+ 
+ SELECT
+ FROM pg_class
+ WHERE relname = 't1';
+
+ explain 
+ select * 
+ from t1 where c1 > 6000 and c1 < 7000;
+ SELECT (relpages *  1)       -- 총 Block을 처리하는 I/O 비용 추정 치
+		+ (reltuples * 0.01)    -- 행을 처리하는 CPU 비용 추정 치 
+		+ (reltuples * 0.0025)  -- Filter 오퍼레이션을 처리하는 CPU 비용 추정 치 
+		+ (reltuples * 0.0025)  -- Filter 오퍼레이션을 처리하는 CPU 비용 추정 치
+ FROM pg_class WHERE relname = 't1';
+
+• Index Scan Cost 
+ create index test1 on t1(c1);
+ select relpages,reltuples
+ from pg_catalog.pg_class where relname ='test1';
+
+ select * from  bt_metap('test1');
+
+ explain select * from t1 where c1 > 6000;
+
+ select attname, most_common_vals, most_common_freqs , histogram_bounds
+ from pg_stats where tablename = 't1' and attname ='c1';
+ 
+ select tablename, attname, correlation
+ from pg_stats where tablename ='t1' and attname = 'c1';   
+ 
+ 
+ 
+2. PostgreSQL 통계정보
+
+ 2.1 수동 통계정보 수집
+
+• 데이터베이스 통계 수집
+ analyze;
+
+• 테이블 통계 수집
+ analyze t1;
+
+• 컬럼 통계 수집 
+ analyze t1(c1);
+
+• verbose 통계 수집 
+ analyze verbose t1;
+
+• 락이 발생한 테이블은 skip하고 통계 정보를 수집하기
+ drop table t1;
+ create table t1(c1 integer, c2 integer);  
+ insert into t1
+ select c1,(c1%4)+1
+ from generate_series(1,1000) as c1;
+ 
+ drop table t2 ;
+ create table t2(c1 integer, c2 integer);  
+ insert into t2
+ select c1, (c1%4)+1
+ from generate_series(1,1000) as c1;
+ 
+• 통계 정보 확인
+ select schemaname,relname,n_tup_ins,last_vacuum,last_autovacuum,last_analyze,
+        last_autoanalyze,autovacuum_count,analyze_count,autoanalyze_count
+ from pg_stat_user_tables
+ where relname ='t1';
+ 
+• 컬럼 데이터의 null 비율 예측하기
+ drop table t1 ;
+ create table t1( c1 integer, c2 integer ) ;
+ 
+ insert into t1
+ select c1, null
+ from generate_series(1,1000) as c1;
+ 
+ insert into t1 
+ select c1,c1+1
+ from generate_series(1,3000) as c1;
+ analyze t1; --- null_frac 값으로 null_rows 계산
+
+ select round(a.reltuples*b.null_frac) as null_rows, a.reltuples, b.null_frac
+ from pg_class a, pg_stats b 
+ where a.relname = b.tablename
+ and b.tablename ='t1'
+ and b.attname='c2'; 
+ 
+ explain 
+ select c1 from t1 where c2 is null;
+                       
+• n_distinct  
+ drop table t2 ;
+ create table T2(c1 integer, c2 integer,c3 integer, c4 integer);
+ 
+ insert into t2 
+ select c1, 
+       mod(c1,2000),  --- 전체 대비 10%
+       mod(c1,2020),  --- 전체 대비 10.01%
+       mod(c1,10000)  --- 전체 대비 50%
+ FROM generate_series(1,20000) as c1;
+ 
+ analyze t2;
+ select attname, n_distinct
+ from pg_stats
+ where tablename = 't2' and  attname in('c1','c2','c3','c4');
+  
+• MCV, MCF 비용 추정확인하기 
+ drop table t1;
+ CREATE TABLE t1( c1 integer, c2 text);
+ INSERT INTO t1(c1, c2)
+ SELECT  
+ ROW_NUMBER() OVER(ORDER BY CASE  
+                       WHEN generate_series <= 1 THEN 6
+                              CASE 
+                                 WHEN generate_series <= 200 THEN 5
+                                 WHEN generate_series <= 399 THEN 4
+                                 WHEN generate_series <= 599 THEN 3
+                                 WHEN generate_series <= 798 THEN 2
+                                ELSE 1 END DESC),
+						WHEN generate_series <= 1 THEN '사장'
+						WHEN generate_series <= 200 THEN '부장'
+						WHEN generate_series <= 399 THEN '차장'
+						WHEN generate_series <= 599 THEN '과장'
+						WHEN generate_series <= 798 THEN '대리'
+						ELSE '사원'
+    END
+ FROM generate_series(1, 20000);
+ 
+ analyze t1;
+ 
+ select attname, most_common_vals ,most_common_freqs
+ from pg_stats
+ where tablename='t1'; 
+ 
+ explain 
+ select * from t1 where c2='과장';
+ 
+• Histogram bounds 
+ select attname, n_distinct, histogram_bounds  
+ from pg_stats
+ where tablename = 't1' and attname = 'c1'; 
+ 
+ explain analyze
+ select * 
+ from t1 where c1 >=1 and c1 < 200;
+ 
+ explain analyze
+ select * 
+ from t1 where c1 >=200 and c1 < 400;
+ 
+ explain analyze
+ select * 
+ from t1 where c1 >=19800 
+ and c1 < 20000; 
+
+• correlation에 따른 성능 차이 확인하기 
+ drop table t1;
+ create table t1( c1 serial ,
+    c2 integer,
+    c3 integer    
+  );
+
+ insert into t1(c2, c3) 
+ select generate_series(5000, 1, -1) as c2,(random() * 5000 + 1)::integer as c3;
+ 
+ analyze t1;
+ select tablename, attname, correlation 
+ from pg_stats
+ where tablename = 't1';
+ 
+ create index t1_c1 on t1(c1);
+ create index t1_c2 on t1(c2);
+ create index t1_c3 on t1(c3);
+ 
+ explain 
+ select c1,c2,c3 
+ from t1 
+ where c1 between 1 and 2000;
+
+ explain 
+ select c1,c2,c3 
+ from t1
+ where c2 between 1 and 2000;
+				
+ explain 
+ select c1,c2,c3 
+ from t1 
+ where c3 between 1 and 2000;
+                            
+		
+		
+2.2 통계정보 관리 
+
+• 통계정보 수집 파라미터 설정 
+ drop table t1 ; 
+ create table t1(c1 integer, c2 integer) ;
+
+ insert into t1 
+ select c1,(c1%1)+3
+ from generate_series(1,100000) as c1;
+ alter table t1 set(autovacuum_analyze_scale_factor=0.0);
+
+ alter table t1 set(autovacuum_analyze_threshold=500000); 
+
+• 파라미터 변경 전
+ analyze verbose t1;
+
+ • 파라미터 변경 후
+ ALTER SYSTEM SET default_statistics_target=200;
+ select pg_reload_conf(); 
+
+ alter table t1 alter column c1 set statistics 200;
+ alter table t1 alter column c2 set statistics 50;
+
+ analyze t1;
+
+ drop table t1;
+ CREATE TABLE t1(
+    c1 INTEGER
+ );-- 1부터 40000값을 11번 반복하여 입력
+
+ INSERT INTO t1(c1)
+ SELECT n
+ FROM generate_series(1, 40000) AS n CROSS JOIN generate_series(1, 11);
+
+ analyze t1;
+ select tablename, attname, n_distinct 
+ from pg_stats
+ where tablename = 't1';
+
+ alter table t1 alter column c1 set(n_distinct= 40000) ;
+ analyze t1;
+ select tablename, attname, n_distinct 
+ from pg_stats where tablename = 't1';
+
+ delete 
+ from t1 where c1 >= 30000 and c1 <= 40000;
+ analyze t1;
+
+ select tablename, attname, n_distinct 
+ from pg_stats where tablename = 't1';
+
+ explain 
+ select * from t1 where c1 = 1;
+ 
+ alter table t1 alter column c1 reset(n_distinct);
+ analyze t1;
+
+ select tablename, attname, n_distinct 
+ from pg_stats where tablename = 't1';
+
+ explain                               
+ select * 
+ from t1 
+ where c1 = 1;
+
+
+
+3. 실행 계획
+
+ drop table t1;
+ drop table t2; 
+ CREATE TABLE t1(
+    c1 INT,
+    c2 INT
+  );
+
+ insert into t1(c1, c2)
+ select c1,  -- 1부터 10000까지의 순차적인 값 할당
+        case when mod(c1,10)= 0 then 10 else mod(c1,10) end as c2  
+ from generate_series(1, 10000) as c1;
+
+ CREATE TABLE t2( c1 INT , c2 VARCHAR(1) NOT NULL );
+
+ INSERT INTO t2(c1, c2) 
+ VALUES(1, 'A'),(2, 'B'),(3, 'C'),(4, 'D'),(5, 'E'),(6, 'F'),(7, 'G'),(8, 'H'),(9, 'I'),(10, 'J');
+ analyze t1;
+ analyze t2;
+
+ explain select * from t1; 
+ 
+ BEGIN;
+  EXPLAIN ANALYZE "DML SQL문";
+  ROLLBACK;
+ 
+ explain analyze 
+ select * from t1; 
+
+ explain(analyze,buffers) 
+ select * from t1;
+
+
+
+3.2 실행계획 분석
+
+ explain(analyze,buffers)
+ select * 
+ from t1,t2
+ where t1.c1 = 100
+ and t1.c2 = t2.c1;
+
+• Elapsed Time   
+ create index test1 on t1(c1);   
+
+ explain(analyze, buffers)
+ select * from t1,t2 where t1.c1 = 100 and t1.c2 = t2.c1;
+  
+ drop table t1; 
+ drop table t2;
+ drop table t3; 
+ drop table t4;
+ create table t1( c1 integer ) ; 
+ 
+ insert into t1
+ select case when mod(c1,4) = 0 then 4 else mod(c1,4) end
+ from generate_series(1,10000) as c1 ;
+ 
+ create index idx01_t1 on t1(c1);
+ 
+ create table t2( c1 int, c2 varchar(1) not null); 
+ insert into t2(c1,c2) values(1,'A'),(2,'B'),(3,'C'),(4,'D');
+ create table t3(c1 integer, c2 integer);
+ 
+ insert into t3 
+ select c1, mod(c1,1000)
+ from generate_series(1,20000) as c1;
+ 
+ create index idx01_t3 on t3(c1);
+ create table t4(c1 integer); 
+ 
+ insert into t4 
+ select c1 
+ from generate_series(1,50000) as c1; 
+
+ analyze t1;
+ analyze t2;
+ analyze t3;
+ analyze t4;
+ 
+• 노드의 가장 안쪽부터 실행
+ explain 
+ select * from t1 
+ where c1 =(select c1 
+ from t2 
+ where c2 in('A')
+ );
+
+ explain 
+ select * from t1 a,t2 b where a.c1 = b.c1
+ and a.c1 >= 1 and a.c1 <= 1000
+ and b.c2 in('A','C');
+ 
+• Hash Join의 조인 순서 
+ explain                   
+ select * 
+ from t1 a,t2 b
+ where a.c1 = b.c1;
+ 
+• Sort merge Join의 조인 순서 
+explain 
+select * from t1 a,t3 b where a.c1 = b.c1
+ and a.c1 >=1 and a.c1 <=2 and b.c2 >= 1 and b.c2 <=200 order by a.c1;
+ 
+• 조인 예제 1
+ explain 
+ select * from t1, t2, t3 where t1.c1 = t2.c1 and t3.c1 = t2.c1;\
+
+• 조인 예제 2
+ explain 
+ select * from t1, t2, t3 where t1.c1 = t3.c1
+ and t1.c1 = t2.c1 and t3.c1 >=1 and t3.c1 <= 10; 
+      
+• Plan 모드 선택  
+ drop table t1; 
+ create table t1(c1 INTEGER );
+ insert into t1(c1)
+ select
+     case when generate_series <= 100 THEN 1  
+          when generate_series <= 200 THEN 2
+          when generate_series <= 300 THEN 3  else 4
+     end
+ from generate_series(1, 1000300);
+ create index idx01_t1 on t1(c1) ;
+ 
+ analyze t1;
+ select c1, count(*) 
+ from t1 
+ group by c1; 
+
+ deallocate t1;
+
+ prepare t1(int) as 
+ select c1
+ from t1 
+ where c1 = $1;
+ 
+ select name, statement, generic_plans, custom_plans 
+ from pg_prepared_statements; 
+ 
+ select name, statement, generic_plans, custom_plans
+ from pg_prepared_statements;
+  
+• set 명령어를 통해 접속한 세션에만 적용되도록 파라미터를 변경 
+ set plan_cache_mode ='force_generic_plan';
+ 
+ deallocate t1;
+ prepare t1(int) as 
+ select c1
+ from t1 
+ where c1 = $1; 
+ 
+ select name, statement, generic_plans, custom_plans 
+ from pg_prepared_statements;
+  
+ select name, statement, generic_plans, custom_plans
+ from pg_prepared_statements;
+ 
+• set 명령어를 통해 접속한 세션에만 적용되도록 파라미터를 변경 
+ set plan_cache_mode ='force_custom_plan'; 
+ 
+ select name, statement, generic_plans, custom_plans
+ from pg_prepared_statements;
+ 
+ 
+ 
+5. 스캔 방법(Scan Method)
+ 
+ 5.1 Sequential Scan 
+
+• seq scan  수행 확인하기
+ drop table t1 ;
+ CREATE TABLE t1( c1 INTEGER, c2 INTEGER );-- 1부터 10000까지의 순차적인 값을 c1 컬럼에 입력
+
+ INSERT INTO t1(c1)
+ SELECT generate_series(1, 10000);-- 1부터 10000까지의 값을 랜덤 순서로 저장한다. 
+
+ UPDATE t1
+  SET c2 = subquery.random_value
+ FROM(
+    SELECT c1, row_number() OVER(ORDER BY random()) AS random_value
+    FROM t1
+ ) AS subquery
+ WHERE t1.c1 = subquery.c1;
+ 
+ analyze t1; 
+ explain(analyze, buffers) 
+ select * from t1  
+ where c1 >= 2000 and c1 <= 4000 
+ order by c1; 
+
+ select relpages, reltuples
+ from pg_catalog.pg_class
+ where relname ='t1';
+
+• 인덱스 구성 컬럼의 정렬에 따라 테이블 랜덤 IO 발생 테스트 
+ select tablename, attname, correlation
+ from pg_stats where tablename = 't1' and attname ='c1';
+ 
+ create index idx01_t1 on t1(c1);
+ analyze t1; 
+ explain(analyze, buffers, costs off)
+ select * 
+ from t1 where c1 >= 2000 and c1 <= 4000
+ order by c1; 
+ 
+ select tablename, attname, correlation
+ from pg_stats
+ where tablename = 't1' and attname ='c2';
+ 
+ analyze t1; 
+ create index idx02_t1 on t1(c2);
+ 
+ explain(analyze, buffers, costs off)
+ select * 
+ from t1 
+ where c2 >= 2000 and c2 <= 4000
+ order by c2;
+
+• set 명령어로 스캔 방식을 제어한 후, 앞의 사례와 인덱스 스캔 I/O 발생량 비교하기
+ set enable_seqscan = off;
+ set enable_bitmapscan = off;
+ 
+ explain(analyze, buffers, costs off)
+ select * 
+ from t1 
+ where c2 >= 2000
+ and c2 <= 4000
+ order by c2;
+ 
+• Bitmap Heap Scan 과정
+ explain(analyze, buffers, costs off)
+ select * 
+ from t1 where c2 >= 2000 and c2 <= 4000
+ order by c2;
+  
+ select * 
+ from t1 
+ where c2 >= 2000
+ and c2 <= 4000 ;
+ 
+• Exact, Lossy 모드 성능 비교
+ drop table t1;
+ create table t1(    
+    c1 INTEGER,
+    c2 SERIAL    
+ );
+
+ insert into t1(c1) 
+ select c1 
+ from generate_series(1,30000000) as c1 
+ order by random();
+
+ analyze t1;
+ create index idx01_t1 on t1(c1);
+
+ show work_mem;
+
+ select  tablename, attname, correlation
+ from    pg_stats 
+ where  tablename = 't1';
+
+ explain(analyze,buffers,costs off)
+ select * 
+ from t1 where c1 >=1 and c1 <=4000000;
+
+ set work_mem='20MB';
+ explain(analyze,buffers,costs off)
+ select * from t1
+ where c1 >=1
+ and c1 <=4000000;
+
+
+
+5.4 Index Only Scan 
+
+• Index only scan
+ drop table t1;
+ create table t1(    
+    c1 INTEGER, c2 INTEGER, 3 INTEGER
+ );
+
+ INSERT INTO t1(c1, c2, c3)
+ SELECT
+    c1_seq,10001 - c1_seq, FLOOR(RANDOM() * 10000) + 1
+ FROM generate_series(1, 10000) AS c1_seq;
+ analyze t1;
+
+ create index idx01_t1 on t1(c1,c2) ;
+
+ explain(analyze, costs off, buffers) 
+ select c1,c2,c3
+ from t1 
+ where c1 >= 1 and c1 <= 3000 and c2 >= 2000 ;
+
+ create index idx02_t1 on t1(c1,c2,c3);
+
+ explain(analyze, costs off, buffers) 
+ select c1,c2,c3
+ from t1 where c1 >= 1 and c1 <= 3000 and c2 >= 2000 ;
+
+ delete from t1 
+ where c1>=1 
+ and c1<=1000;
+
+ explain(analyze, costs off, buffers)
+ select c1,c2,c3
+ from t1 where c1 >= 1 and c1 <= 3000 and c2 >= 2000 ;
+
+ select blkno,all_visible from pg_visibility('t1');
+ vacuum t1;
+ select blkno,all_visible from pg_visibility('t1');
+
+ explain(analyze, costs off, buffers)
+ select c1,c2,c3
+ from t1 
+ where c1 >= 1 
+ and c1 <= 3000
+ and c2 >= 2000 ;
+
+
+
+5.5 Covering Index 
+
+ create index idx03_t1 on t1(c1,c2) include(c3);
+
+ explain(analyze, costs off, buffers)
+ select c1,c2,c3
+ from t1 
+ where c1 >= 1 and c1 <= 3000 and c2 >= 2000 ;
+ 
+ drop table t2;
+ CREATE TABLE t2( c1 INTEGER , c2 INTEGER );
+ INSERT INTO t2(c1, c2) VALUES (1, 1),(2, 1),(3, 2),(4, 2),(5, 1),(6, 1),(7, 2),(8, 2),(9, 1),(10, 1);
+ 
+ analyze t2;
+ create unique index idx01_t2 on t2(c1) include(c2);
+ \d+ t2;
+ 
+ 
+ 
+6. 조인 방법(Join Method)
+ 
+ 6.1.1 Materialize
+
+• Materialize 조인  
+ drop table t1;
+ drop table t2;
+ create table t1 as
+ select level as c1,
+     chr(65 + mod( level , 26 ) ) as c2 ,
+     level + 99999 as c3
+ from generate_series(1 , 500000 ) level ;
+ 
+ analyze t1;
+ create table t2 as
+ select level as c1,
+     chr(65 + mod( level , 26 ) ) as c2 ,
+     case
+         when mod(level , 10 ) ::int = 0::int
+         then null
+         else mod(level  , 10 ) ::int
+     end as c3
+ from generate_series(1 , 5000 ) level ;
+ 
+ analyze t2;
+ 
+• Materialize 조인 방식 비 활성화 
+ set enable_hashjoin=off;
+ set enable_mergejoin=off;
+ set max_parallel_workers_per_gather  = 0;
+
+ explain(analyze, buffers, costs off) select * from t1, t2 where t1.c1 = t2.c1; 
+
+• Work_mem 메모리가 부족해 temp를 사용하는 경우
+ set work_mem = 64;
+ set enable_material=on;
+ explain(analyze, buffers, costs off) select * from t1, t2 where t1.c1 = t2.c1;
+ 
+ 
+• postgresql.conf 파일에 temp_tablespace 값에 테이블스페이스 경로를 등록하기
+ create table temp_tbs location '/temp_tbs';
+ set temp_tablespaces=’temp_tbs’;
+ show temp_tablespaces; 
+ 
+ 
+ 
+6.1.2 Memoize 조인(Caching Rows)
+
+• Memoize 조인 가능 여부 확인 하기 
+ select name, setting, short_desc 
+ from pg_settings where name = 'enable_memoize';
+ 
+• Memoize 조인을 통한 SQL 성능을 확인하기
+ drop table t1;
+ drop table t2;
+ create table t1 as select level %2 as c1, md5(level::text) c2 from generate_series(1, 500000) level;
+ analyze t1;
+ create table t2 as select level as c1, md5(level::text) c2 from generate_series( 1 , 5000000 ) level ;
+ create index t2_idx01 on t2(c1);
+ analyze t2;
+ explain(analyze,buffers,costs off) select * from t1 , t2 where t1.c1 = t2.c1;
+ 
+• memoize 조인에서 데이터를 캐시 사용 여부 확인하기 
+ drop table t1;
+ drop table t2;
+ create table t1 as select level %500 as c1,
+                  md5(level::text) c2
+ from generate_series(1, 50000) level;
+ 
+ analyze t1;
+ create table t2 as select level as c1,
+             md5(level::text) c2
+ from generate_series(1 , 5000000 ) level ;
+ 
+ analyze t2;
+ create index t2_idx01 on t2(c1);
+ set work_mem = 64;
+ explain(analyze,buffers) 
+ select t2.c2,t2.c1 
+ from t1 , t2  where t1.c1 = t2.c1;
+ 
+• work_mem 크기가 작을 때 메모리에 저장할 컬럼의 데이터 길이가 클 경우 
+ insert into t2 select 100, repeat(md5(i::text),60) 
+ from generate_series(1,1000) i;
+
+ set enable_memoize = on;
+ set work_mem = 64;
+
+ explain(analyze,buffers, costs off) 
+ select * 
+ from t1 , t2 where t1.c1 = t2.c1;
+
+• overflows를 없애기 위해 work_mem 크기를 늘리고 결과 확인하기.
+ SET work_mem = 20480;
+ 
+ explain(analyze,buffers, costs off) 
+ select  * from t1 , t2 where t1.c1 = t2.c1;
+ 
+ 
+ 
+6.1.3 Anti 조인
+
+• 안티 조인의 실행계획 확인하기
+ drop table t1;
+ drop table t2;
+ create table t1 as
+ select case when level between 1 and 1000 then 'a' 
+		 when level between 1001 and 2000 then 'b'
+		 when level between 2001 and 3000 then 'c'
+		 when level between 3001 and 4000 then 'd'
+		 when level between 4001 and 5000 then 'e'
+		 when level between 5001 and 6000 then 'f'
+		end as c1, level%1000+1 c2 
+ from generate_series(1, 6000 ) level ;
+
+ create table t2 as
+ select case when level between 1 and 10000 then 'a' 
+	 when level between 10001 and 20000 then 'b'
+	 when level between 20001 and 30000 then 'c'
+	 end as c1, level%10000+1 c2
+ from generate_series(1, 30000) level; 
+
+ create index t2_idx_01 on t2(c1);
+
+ explain(analyze,buffers)
+ select c1 
+ from t1 where t1.c2 < 100
+ and not exists 
+ (select c1 from t2 where t1.c1 = t2.c1);
+
+• Left join을 사용하여 메인 쿼리블록의 추출 건수만큼 반복 조인을 수행
+ explain(analyze,buffers, costs off) 
+ select t1.c1 from t1 left join t2 on t1.c1 = t2.c1 
+ where t1.c2 < 100 and t2.c1 is null;
+
+
+
+6.1.4 Semi 조인
+
+• Semi 조인 확인하기
+ explain(analyze, buffers, costs off) 
+ select * from t1 
+ where t1.c2 < 100 
+ and exists(select 'y' from t2 where t1.c1 = t2.c1);
+  
+  
+  
+6.1.5 Lateral Join
+
+• 인라인 뷰 내부에 조인 조건을 표현할 경우 에러가 발생 
+ select *
+ from   t1,(select c1,
+               max(c2)
+             from   t2 
+             where t1.c2 = t2.c2
+             group by c1) v1
+ where t1.c2 between 1 and 10;
+  
+ select * from t1, lateral(select c1, max(c2)
+ from   t2
+ where t1.c2 = t2.c2
+ group by c1) v1 
+ where t1.c2 between 1 and 10;
+ 
+• lateral 기능을 활용하기
+ select *
+ from   t1 left join lateral( select c1, max( c2 ) from t2 where t1.c2 = t2.c2 group  by c1 ) v1 on true
+ where  t1.c2 between 1 and 10 ;
+ 
+ 
+ 
+6.1.6 Parallel Mode
+
+• NL 조인에서 non parallel 모드와 parallel 모드를 비교하기
+ drop table t1;
+ drop table t2;
+ 
+ create table t1 as
+ select generate_series(1,1000) as c1, md5(level::text) c2
+ from generate_series(1, 50000000) level;
+ select pg_size_pretty(pg_total_relation_size('t1'));
+ 
+ create table t2 as
+ select level as c1, md5(level::text) c2
+ from generate_series(1, 5000000) level;
+ 
+ select pg_size_pretty(pg_total_relation_size('t2'));
+ 
+ create index t2_idx_01 on t2(c1);
+ select pg_size_pretty(pg_total_relation_size('t2_idx_01'));
+ 
+ explain(analyze,buffers, costs off) 
+ select * from t1, t2 where t1.c1 = t2.c1 and t1.c1 > '100';
+ 
+ 
+ 
+6.2 Hash Join
+
+• Hash 조인 실행계획 분석하기 
+ drop table t1;
+ drop table t2;
+
+ create table t1 as
+ select 'a' as c1, level c2
+ from generate_series(1, 10) level;
+ analyze t1;
+ 
+ create table t2 as
+ select 'a' as c1, level c2
+ analyze t2;
+ from generate_series(1, 1000) level;
+ 
+ explain(analyze,buffers, costs off) 
+ select * from t1, t2 
+ where t1.c1 = t2.c1;  
+
+• two pass hash 조인의 실행계획 확인하기
+ drop table t1;
+ drop table t2;
+ 
+ create table t1 as
+ select 'a' as c1, level c2
+ from generate_series(1, 10000) level ;
+ analyze t1;
+ 
+ create table t2 as
+ select 'a' as c1, level c2
+ from generate_series(1, 10000 ) level ;
+ 
+ analyze t2;
+ 
+ set work_mem=400;
+  
+  
+# temp_file_limit
+
+• backend 프로세스별 temp 테이블스페이스 사용량  모니터링하기
+ create view public.tmp_usg as
+	select a.datname ,
+		   a.pid ,
+		   coalesce (size, '0 mb') as temp_size_w,
+		   coalesce (temp_tablespace, 'not using temp files') as temp_tbs,
+		   a.application_name as app_name,
+		   a.client_addr ,
+		   a.usename ,
+		   (clock_timestamp() - a.query_start ) ::interval( 0 ) as duration ,
+		   (clock_timestamp() - a.state_change ) ::interval( 0 ) as duration_since_state_change ,
+		   trim(trailing ';'
+			from left (query, 1000)) as query,
+		   a.state ,
+		   a.wait_event_type || ':' || a.wait_event as wait
+	from   pg_stat_activity as a left join ((
+		   select substring(file
+				   from '\d+\d') as pid,
+				  a.tbl_name as temp_tablespace,
+				  pg_size_pretty(sum( pg_size_bytes( size ) ) ) as size
+		   from (
+				   select a.tbl_name,
+						  a.tbl_location || '/pgsql_tmp' as path
+				   from (
+						   select spcname as tbl_name,
+								  coalesce(nullif( pg_tablespace_location( oid ) , '' )
+	, (current_setting('data_directory' ) || '/base' ) ) as tbl_location
+						   from   pg_tablespace) as a
+				   where tbl_name = 'pg_default'
+				   union all
+				   select a.tbl_name,
+						  a.tbl_location || '/' || path.path || '/pgsql_tmp'
+				   from (select spcname as tbl_name,
+								  coalesce(nullif( pg_tablespace_location( oid ) , '' )
+								  ,current_setting( 'data_directory' ) || '/base' ) ) as tbl_location
+						   from   pg_tablespace) a,
+						  lateral pg_ls_dir(tbl_location ) as path
+				   where path ~('pg_' || substring( current_setting( 'server_version' )
+											from '^(?:\d\.\d\d?|\d+)' ) )) as a ,
+				  lateral pg_ls_dir(path , true , false ) as file ,
+				lateral pg_size_pretty(( pg_stat_file( path || '/' || file , true ) ) .size ) as size
+		   group by pid, temp_tablespace )) stat on a.pid = stat.pid::int
+	where a.pid != pg_backend_pid( )
+	order by temp_size_w desc;
+ 
+ select datname,pid,temp_size_w,temp_tbs ,app_name from public.tmp_usg;
+ 
+• MCV 수집 후 hash 조인 테스트
+ drop table t1;
+ drop table t2;
+ create table t1 as 
+ select level as C1, 'DUMMY' as C2  from GENERATE_SERIES(1,100000) as level;
+ analyze t1;
+ 
+ create table t2 as 
+ select level%9+1 as C1, 'DUMMY' as C2  from GENERATE_SERIES(1,9000000) as  level;
+ insert into t2 select level as c1,'DUMMY' as c2 from GENERATE_SERIES(10,1000009) as level;
+ analyze t2;--Probe 테이블의 통계정보 확인 결과 MCV값이 1-9로 확인
+ select most_common_vals from pg_stats where tablename = 't2' and attname = 'c1';
+  
+ set work_mem =64;
+ select relpages from pg_class where relname = 't2';
+ explain(analyze,buffers, costs off) select * from t1 , t2 where t1.c1 = t2.c1; 
+ 
+• MCV 값을 수집하지 않고 hash 조인 수행
+ drop table t2;
+ create table t2 as 
+ select level%9+1 as C1, 'DUMMY' as C2  from GENERATE_SERIES(1,9000000) as level;
+
+ insert into t2 select level as c1,'DUMMY' as c2 from GENERATE_SERIES(10,1000009) as 
+ level; 
+
+ alter table t2 alter column c1 set statistics 0;
+ analyze t2;
+
+ select most_common_vals from pg_stats where tablename = 't2' and attname = 'c1';
+ 
+ set work_mem = 64;
+ explain(analyze,buffers, costs off) select * from t1 , t2 where t1.c1 = t2.c1;
+  
+  
+  
+6.2.3 Parallel One-Pass Hash Join
+
+• Non-parallel hash 조인 
+ drop table t1;
+ drop table t2;
+ create table t1 as select GENERATE_SERIES(1,1000000) as C1,'TEST' as C2;
+ analyze t1;
+ create table t2 as select GENERATE_SERIES(1,10000000)as C1,'TEST' as C2;
+ analyze t2;
+ set work_mem= '50MB';
+ set max_parallel_workers_per_gather=0;
+ set enable_parallel_hash = off;
+ explain(analyze,buffers, costs off) 
+ select count(*) from t1,t2 where t1.c1 = t2.c1;
+ 
+ set work_mem= '10MB';
+ SET max_parallel_workers_per_gather=4; 
+ 
+ SET enable_parallel_hash = on;
+ explain(analyze,buffers, costs off) select count(*) from t1 , t2 where t1.c1 = t2.c1;
+
+
+
+6.2.4 Parallel Two-Pass Hash Join
+
+ 6.3 Sort-Merge Join
+ 
+ drop table t1;
+ create table t1 as 
+ select i as c1,
+          'a'||mod(i,5) as c2
+         , case when i < 1000 then i*100 else i end as c3
+ from generate_series(1,100000) i;
+ 
+• Quick sort 수행하기
+ set work_mem= 8192;
+ explain(analyze, buffers, costs off)
+ select * from t1
+ order by c3 desc;
+
+• External sort 수행하기
+ set work_mem= 64;
+ explain(analyze, buffers, costs off)
+ select * from t1
+ order by c3 desc;    
+ 
+• Top-N heapsort 사용하기
+ explain( analyze , buffers , costs off )
+ select * from t1
+ order by c3 desc
+ limit 10;
+  
+• Incremental sort = off 일 경우
+ create index t1_idx01 on t1(c3);
+ set enable_incremental_sort=off;
+ explain(analyze, buffers, costs off)
+ select * from t1
+ order by c3 desc, c2 desc;
+  

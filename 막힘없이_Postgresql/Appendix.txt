@@ -1,0 +1,516 @@
+[ Appendix ]
+
+1. 격리 수준에 따른 이상 현상
+
+ 1.1 Read Committed 
+
+• Non-Repeatable Read
+ drop table t ;
+ create table t( id integer, name char(3), point integer);
+ insert into t values(1, 'aaa', 1000),(2,'bbb',2000),(3,'ccc',3000) ;
+
+• T1 트랜잭션
+ begin ; 
+  set transaction isolation level read committed;
+  select * from t where id = 2;
+ 
+• T2 트랜잭션
+ select * from t where id = 2;
+
+• T1 트랜잭션
+ update t set point=point-100 where id =2;
+  select * from t where id = 2;
+  commit;
+
+• T2 트랜잭션
+ select * from t where id = 2;
+
+# Phantom Read
+• T1 트랜잭션
+ begin;
+  set transaction isolation level read committed;
+  select * from t;
+  insert into t values(4,'ddd',4000) ;
+
+• T2 트랜잭션
+ begin;
+ select * from t;
+ set transaction isolation level read committed;
+
+• T1 트랜잭션
+ commit; 
+
+• T2 트랜잭션
+ select * from t;
+
+ # Read Skew 
+• T1 트랜잭션
+ begin;
+  set transaction isolation level read committed;
+  select * from t;
+
+• T2 트랜잭션
+ begin;
+  set transaction isolation level read committed;
+  update t set point = point – 1000 where id = 1 ; 
+
+• T1 트랜잭션
+ select point from t where id = 1; 
+
+• T2 트랜잭션
+ update t set point = point – 1000 where id = 2 ; 
+ commit;
+
+• T1 트랜잭션
+ select point from t where id = 2;  
+ select point from t where id = 3;
+
+• 최종 테이블에 저장된 point 합계
+select sum(point) from t ;
+
+
+#Lost Update
+
+ • T1 트랜잭션
+ begin;
+  set transaction isolation level read committed;
+  select point from t where id = 1;
+
+• T2 트랜잭션
+ begin;
+  set transaction isolation level read committed;
+  select point from t where id = 1;
+
+• T1 트랜잭션
+ commit;
+
+ update t set point =(1000+100) where id = 1;
+ select point from t where id = 1;
+
+• T2 트랜잭션
+ update t set point =(1000+100) where id = 1;
+ select point from t where id = 1;
+
+• T1 트랜잭션
+ begin;
+  set transaction isolation level read committed;
+  select point from t where id = 1; 
+
+• T2 트랜잭션
+ begin;
+  set transaction isolation level read committed;
+  select point from t where id = 1;
+  
+• T1 트랜잭션
+ update t set point = point +100 where id = 1 ;
+ commit;
+ select point from t where id = 1;
+  
+• T2 트랜잭션
+ update t set point = point+100 where id = 1 ;
+ commit;
+ select point from t where id = 1;
+  
+  
+  
+1.2 Repeatable Read
+
+• T1 트랜잭션
+ begin;
+  set transaction isolation level repeatable read;
+  select * from t where id = 1
+  
+• T2 트랜잭션
+ begin;
+  set transaction isolation level repeatable read;
+  update t set point = point+100 where id = 1;
+  UPDATE 1
+  select * from t where id = 1; 
+  commit; 
+ 
+• T1 트랜잭션
+ select * from t where id = 1;
+ 
+• T1 트랜잭션
+ commit;
+ select * from t where id = 1;
+
+
+# Lost update
+
+• T1 트랜잭션
+ begin;
+  set transaction isolation level repeatable read;
+  select * from t where id = 1;
+ 
+• T2 트랜잭션
+ begin;
+  set transaction isolation level repeatable read;
+  select * from t where id = 1;
+ 
+• T1 트랜잭션
+ update t set point=1200 where id = 1;
+ UPDATE 1
+ select * from t where id = 1;
+ Commit ;
+  
+• T2 트랜잭션
+update t set point=1200 where id = 1;
+  Rollback ;
+  
+  
+# Write Skew 
+
+• T1 트랜잭션
+ begin;
+  set transaction isolation level repeatable read;
+  select * from t ;
+
+ select sum(point) from t where name = 'ccc';
+ 
+• T2 트랜잭션
+ begin;
+  set transaction isolation level repeatable read;
+  select sum(point) from t where name = 'ccc';
+ 
+• T1 트랜잭션
+ update t set point=point-500 where id = 3;
+ 
+• T2 트랜잭션
+ update t set point=point-500 where id = 4;
+ commit; 
+ 
+• T1 트랜잭션
+ select * from t where name ='ccc';
+
+ commit ;
+ select * from t where name ='ccc';
+ 
+ 
+# 비정상 Read-only transaction
+
+ drop table t ;
+ create table t
+ (id integer, name char(3), point integer);
+ insert into t values(1,'aaa',1000),(2,'bbb',2000),(3,'ccc',3000),(4,'ccc',4000);
+ 
+• T1 트랜잭션
+ begin;
+  set transaction isolation level repeatable read;
+  select * from t;
+ 
+• T2 트랜잭션
+ begin;
+  UPDATE 1
+  update t set point=point+ (select sum(point) from t)*0.1  where id=3;
+  set transaction isolation level repeatable read;
+  update t set point=point-100 where id = 4;
+  commit;
+ 
+• T3 트랜잭션
+ begin;
+  set transaction isolation level repeatable read;
+  select * from t;
+ 
+• T1 트랜잭션
+ commit ; 
+
+• T3 트랜잭션
+select * from t;
+
+• T3 트랜잭션
+commit ;
+ select * from t;
+ 
+ 
+ 
+1.3 Serializable
+
+• T1 트랜잭션
+ begin isolation level serializable;
+ select * from t ;
+ select sum(point) from t where name = 'ccc';
+ 
+• T2 트랜잭션
+ begin ISOLATION LEVEL SERIALIZABLE;
+ select sum(point) from t where name = 'ccc';
+ 
+• T1 트랜잭션
+ update t set point=point-500 where id = 3;
+
+• T2 트랜잭션
+ update t set point=point-500 where id = 4;
+ commit; 
+ 
+• T1 트랜잭션
+ select sum(point) from t where name = 'ccc';
+
+
+# 비정상 Read only transaction Failure
+
+ drop table t ;
+ create table t
+ (id integer, name char(3), point integer);
+ select * from t;
+ insert into t values(1,'aaa',1000),(2,'bbb',2000),(3,'ccc',3000),(4,'ccc',4000);
+ 
+• T1 트랜잭션
+ begin isolation level serializable;
+ update t set point= point + (select sum(point) from t) * 0.1 where id=3;
+ 
+• T2 트랜잭션
+ begin isolation level serializable;
+ update t set point=point-100 where id = 4;
+ commit;
+ 
+• T3 트랜잭션
+ begin isolation level serializable;
+ select * from t;
+ 
+• T1 트랜잭션
+ commit;
+
+
+# Read only defferable 옵션으로 조회 
+
+• T1 트랜잭션
+ begin isolation level serializable;
+ update t set point=point+ (select sum(point) from t)*0.1 where id=3;
+ 
+• T2 트랜잭션
+ begin isolation level serializable;
+ update t set point=point-100 where id = 4;
+ commit;
+ 
+• T3 트랜잭션
+ begin isolation level serializable READ ONLY DEFERRABLE;
+ select * from t;
+ 
+• T1 트랜잭션
+ commit;
+
+ truncate table t;
+ TRUNCATE TABLE
+ insert into t values(1,'aaa',1000),(2,'bbb',2000),(3,'ccc',3000),(4,'ccc',4000);
+ 
+• T1 트랜잭션
+ BEGIN ISOLATION LEVEL SERIALIZABLE;
+ update t set point=point-100 where id = 4;
+ 
+• T2 트랜잭션
+ BEGIN ISOLATION LEVEL SERIALIZABLE READ ONLY DEFERRABLE;
+ select * from t;   
+ 
+• T1 트랜잭션
+ commit;
+ 
+• T2 트랜잭션
+ select * from t where id=4 ;
+ commit;
+ select * from t where id=4 ;
+  
+  
+  
+2. 테이블 팽창(Bloating) 모니터링
+
+• Vacuum이 필요한 테이블 모니터링
+ drop table t1 ;
+ create table t1(id integer, name char(2000)) with(fillfactor = 100);
+ alter table t1 set(autovacuum_enabled=false) ;
+ create index idx_t1 on t1(id) ;
+ 
+ insert into t1 
+ select i, 'ccc' 
+ from pg_catalog.generate_series(1,100) a(i) ;
+
+ create extension pgstattuple ;
+ select * from pgstattuple('t1') ;
+ 
+• 데드 튜플 발생 비율을 관찰하기 위해 50건을 update  
+ update t1 set name = 'bbb' where id between 1 and 50;
+ select * from pgstattuple('t1') ; 
+ 
+ Vacuum t1 ; 
+ select * from pgstattuple('t1'); 
+
+ select relname, table_len, tuple_percent, dead_tuple_percent,free_percent
+ from( select relname,(pgstattuple(oid)).*
+       from pg_class 
+       where relkind = 'r')
+ order by dead_tuple_percent desc
+ limit 10;
+
+update t1 set name = 'aaa' ;
+
+ select relname, table_len, tuple_percent, dead_tuple_percent,free_percent
+ from( select relname,(pgstattuple(oid)).*
+       from pg_class 
+       where relkind = 'r' )
+ where table_len >= 1048576
+ order by dead_tuple_percent desc limit 10;
+
+ update t1 set name = 'bbb' ;
+ update t1 set name = 'ccc' ;
+ select table_len
+	 , tuple_count
+	 , tuple_percent
+	 , dead_tuple_count
+	 , dead_tuple_percent
+	 , free_percent
+ from pgstattuple('t1') ;
+
+ select relname, n_tup_upd, n_tup_hot_upd, n_live_tup, n_dead_tup 
+ from pg_stat_all_tables 
+ where relname = 't1' ;
+
+ select avail,count(*)
+ from pg_freespace('t1') 
+ group by avail ;
+
+ select table_len
+	 , tuple_len
+	 , dead_tuple_len
+	 , free_space
+ from pgstattuple('t1') ;
+
+ Vacuum t1 ; 
+ select table_len
+	 , tuple_len
+	 , dead_tuple_len
+	 , free_space
+ from pgstattuple('t1') ;
+
+ select relname, n_tup_upd, n_tup_hot_upd, n_live_tup, n_dead_tup 
+ from pg_stat_all_tables 
+ where relname = 't1'
+
+• pg_freespace를 조회하기
+ select avail,count(*)
+ from pg_freespace('t1') 
+ group by avail ;
+ 
+ 
+ 
+3. SQL 모니터링  
+
+• TopSQL 추출하기
+with total 
+as ( select sum(calls) t_calls
+	,nullif(sum(total_plan_time+total_exec_time),0) t_elapt
+	,sum(rows) t_rows
+	,sum(shared_blks_hit) t_lio 
+	,sum(shared_blks_read) t_pio
+     from pg_stat_statements s where dbid = :1 and userid = :2)
+select d.datname
+      , u.usename 
+	  , queryid 
+	  , query 
+	  , round((ts.rows/ts.calls)::numeric ,2) avg_rows
+	  , round(((ts.total_plan_time+ts.total_exec_time)/1000/calls)::numeric,2) avg_time
+	  , ts.calls t_calls
+	  , ts.rows t_rows
+	  , round(((ts.total_plan_time+ts.total_exec_time)/1000)::numeric,2) t_elpat
+	  , ts.shared_blks_hit t_lio 
+	  , ts.shared_blks_read t_pio 
+	  , round((ts.calls / t.t_calls*100)::numeric,2) t_calls_ratio
+	  , round((ts.rows / t.t_rows*100)::numeric,2) t_rows_ratio
+	  ,round((coalesce((ts.total_plan_time+ts.total_exec_time)/ t.t_elapt::numeric,0)*100)::numeric,2) t_elapt_ratio
+	  , round((ts.shared_blks_hit / t.t_lio*100)::numeric,2) t_lio_ratio
+	  , round((ts.shared_blks_read / t.t_pio*100)::numeric,2) t_pio_ratio
+from pg_stat_statements ts , total t, pg_user u , pg_database d 
+where ts.userid = u.usesysid 
+and ts.dbid = d.oid
+and  dbid = :1
+and userid = :2
+order by t_elapt_ratio desc  
+  
+  
+  
+3.2 pg_stat_monitor 
+
+• postgresql.conf 파일에 등록
+ shared_preload_libraries = 'pg_stat_monitor' 
+ shared_preload_libraries = 'pg_hint_plan,pg_stat_statements,pg_stat_monitor'
+  
+• DB 재기동
+ pg_ctl restart -D $PGDATA
+ 
+• 익스텐션 설치 및 확인
+ create extension pg_stat_monitor;
+ select * from pg_extension;
+
+• Bucket_start_time 컬럼을 이용한 기간별 TopSQL 추출
+ select queryid,
+       substring( max( query ) , 0 , 40 ) as sql_text ,
+       sum( calls ) as tot_exec ,                                                           
+       sum( total_exec_time )/1000 as tot_exec_time_sec ,                              
+       sum( total_plan_time )/1000 as tot_plan_time_sec ,                              
+       sum( total_exec_time )/1000 / sum( calls ) as avg_exec_time_per_sql ,       
+       sum( total_plan_time )/1000 / sum( calls ) as avg_plan_time_per_sql ,       
+       sum( shared_blks_hit ) as tot_shared_blks_hit ,                                 
+       sum( shared_blks_read ) as tot_shared_blks_read ,                               
+       sum( shared_blks_dirtied ) as tot_shared_blks_dirtied ,                        
+       sum( shared_blks_written ) as tot_shared_blks_written ,                        
+       sum( shared_blks_hit ) / sum( calls ) as shared_blks_hit_per_sql ,           
+       sum( shared_blks_read ) / sum( calls ) as shared_blks_read_per_sql ,        
+       sum( shared_blks_dirtied ) / sum( calls ) as shared_blks_dirtied_per_sql , 
+       sum( shared_blks_written ) / sum( calls ) as shared_blks_written_per_sql,
+ 100.0 * sum(shared_blks_hit) / sum(nullif(shared_blks_hit + shared_blks_read, 0)) as hit_percent 
+ from   pg_stat_monitor pgsm
+ where  bucket_start_time between $1 and $2
+ group  by queryid
+ having sum( calls ) > 0
+ order  by tot_shared_blks_read desc
+ limit 100;
+
+• histogram을 이용한 특정 시점 SQL 수행 분포도 확인
+ create or replace function public.histogram_2( _quryid bigint)
+ returns setof record
+ language plpgsql
+ as $function$
+ declare
+ rec record;
+ begin
+    for rec in
+      with  stat as
+      (select bucket_start_time, queryid, bucket, unnest(range()) as range,
+		  unnest(resp_calls)::int freq 
+	  from pg_stat_monitor) 
+	  select bucket_start_time, range,
+	         freq, repeat('■',(freq::float / max(freq) over() * 30)::int) as bar
+      from stat 
+	  where queryid = _quryid and bucket between 0 
+	  and (select setting ::int from pg_settings where name = 'pg_stat_monitor.pgsm_max_buckets') and freq > 0
+    loop
+        return next rec;
+    end loop;
+ end
+ $function$;-- histogram 조회
+ 
+ select * from   histogram_2(:sql_id)
+ as a(bucket_start_time timestamptz,range text, freq int, bar text);
+
+• Top Level Query 확인
+ alter system set pg_stat_monitor.pgsm_track = 'all';
+ select pg_reload_conf() ;
+ select a.bucket_start_time , a.bucket, a.queryid , a.query , a.toplevel ,
+        a.top_queryid , a.top_query , a.calls , 'top level' as sql_depth
+ from pg_stat_monitor a
+ where a.toplevel = 'true'
+ and a.queryid = :query_id
+union all
+ select b.bucket_start_time , b.bucket, b.queryid ,b.query, b.toplevel ,
+		b.top_queryid , b.top_query , b.calls , b.top_queryid || ',' || b.queryid as sql_depth
+ from pg_stat_monitor b
+ where b.toplevel = 'false'
+ and b.top_queryid = :query_id
+ order by bucket_start_time;
+
+• SQL 에러 모니터링
+ select substr(query,0,50) as query,
+ decode_error_level(elevel) as elevel,
+ sqlcode,
+ calls,
+ substr(message,0,50) message
+ from pg_stat_monitor
+ where message is not null; 

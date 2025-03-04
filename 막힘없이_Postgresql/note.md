@@ -333,7 +333,7 @@ OID Types를 사용하여 내부에 존재하는 모든 오브젝트들을 구�
 
 #### 가시성 맵 (Visibility Map, VM)
 
-활성 트랜잭션들이 페이지 내의 모든 튜플의 가시성 여부를 추저하기 위해 사용된다.
+활성 트랜잭션들이 페이지 내의 모든 튜플의 가시성 여부를 추적하기 위해 사용된다.
 
 가시성 맵을 통해 Vaccum 및 인덱스 스캔을 최적화 할 수 있다.
 
@@ -1030,4 +1030,1053 @@ WAL 레코드의 구성요소는 다음과 같다.
 - ﻿﻿CRC checksum: 데이터 손상을 감지하는 체크섬(CRC) 정보를 저장한다.
 
 트랜잭션 시작시, 시작 지점에 LSN에 먼저 저장, 이후 데이터가 변경되면 변경된 내용들이 고유한 LSN과 함께 WAL 레코드에 기록. 데이터 변경이 완료되고 커밋이 수행되면 커밋 레코드가 생성되고 커밋 LSN도 WAL에 저장
+
+### 5.2 체크포인트
+
+체크포인트는 디비의 모든 변경 사항을 특정 시점 기준으로 데이터 파일들이 물리적으로 디스크에 쓰인 상태
+
+체크포인트 실행 조건
+
+*  이전 체크포인트가 끝난 시점부터 checkpoint_timeout(5분) 이상 시간이 소요된 경우
+
+*  전체 WAL 세그먼트 파일의 총 크기가 max_wal_size를 초과한 경우
+
+*  PostgreSQL 서버가 Smart 또는 fast 모드로 종료하는 경우
+
+*  pg_basebackup 또는 pg_start_backup으로 Backup을 시작하는 경우
+
+*  사용자에 의해 Checkpoint 명령어를 실행하는 경우
+
+체크포인트 프로세스는 복구 시점 생성 이후 메모리에 존재하는 Clog 트랜잭션 메타데이터 및 기타 데이터들을 디스크에 기록.
+
+체크포인트가 수행되면 Shared Buffer의 Dirty 페이지들을 디스크에 저장하고, 체크포인트 레코드를 생성하고 Redo 포인트를 저장한다.
+
+체크포인트가 종료되어야만 Redo 포인트가 생성된다.
+
+**복구가능 프로세스** 
+
+![image-20250304120014224](./images//image-20250304120014224.png)
+
+* 체크포인트 수행 중 장애발생 케이스 
+* Redo 포인트는 1 구간에만 존재해서 2구간은 복구할 수 없으며, 복구에 필요한 파일은 1구간의 Start Checkpoint부터 장애 발생 시점까지의 WAL 파일이다
+
+![image-20250304120051139](./images//image-20250304120051139.png)
+
+* 체크포인트 완료 후 장애 발생 케이스
+* 1구간은 2구간으로 인해 WAL 파일이필요 없음.
+* 복구에 필요한 체크포인트 시점은 장애 발생하기 전 최근에 수행된 체크포인트
+
+### 5.3 WAL 세그먼트 파일 관리
+
+체크포인트는 데이터 정합성, 복원 시점 제공 외에도 WAL 세그먼트 파일을 관리함.
+
+체크포인트는 max_wal_size 파라미터 크기 초과했을때에도 수행되며, 이경우 새 Redo 포인트가 생겨 이전 Redo 포인트가 저장된 WAL 파일은 필요하지 않아서 재활용되거나 제거된다.
+
+* min_wal_size : 기본값 80mb, 최소 5개 이상의 파일
+* max_wal_size : 모든 WAL 파일들 크기의 총합. 기본값 1GB, 최대 64개 파일 수
+
+### 5.4 WAL 레코드 기록하기
+
+WAL 레코드는 데이터의 변경 사항을 기록하고, DB 장애 복구와 일관성을 유지하기 위해 필요한 요소이다.
+
+동일한 의미로 WAL 데이터, 트랜잭션 레코드 (XLog record)  라고 한다.
+
+WAL 레코드는 트랜잭션 ID인 XID, 페이지ID, 오프셋, 길이, 이전 데이터, 현재 데이터 등을 비롯한 여러 정보를 포함하고 있다.
+
+입력 삭제 같은 명령어로 데이터 변경이 발생하면 먼저 WAL 버퍼에 기록된다.
+
+변경된 내용을 즉시 디스크에 기록하기 전 공유 메모리 영역인 WAL 버퍼에 임시 저장해서 디스크 I/O를 줄여 DB  성능을 향상시킨다.
+
+WAL 버퍼에 저장된 데이터는 일정 시간이 지나거나 아래 조건에 의해 WAL 세그먼트에 저장된다.
+
+1. ﻿﻿﻿수행 중인 트랜잭션이 커밋/취소(commit or abort)가 수행될 때
+2. ﻿﻿﻿WAL 버퍼가 많은 레코드로 채워질 때
+3. ﻿﻿﻿WAL Writer 프로세스에 의해 주기적으로 기록될 때
+
+###  5.5 WAL 파일을 이용한 데이터 복구
+
+PostgreSQL에서 복구 프로세스가 시작되면 가장 먼저 pg_control 파일을 읽는다.
+
+* `pg_control` 파일은 PostgreSQL 데이터 클러스터의 **핵심 메타데이터**를 저장하는 파일
+* 데이터베이스의 **시스템 식별자(system identifier)**, **타임라인 정보**, **최근 체크포인트(checkpoint) 정보**, **데이터베이스 버전** 등의 중요한 정보를 포함
+
+복구 시작점지점은 Redo 포인트이며, 이 시점부터 WAL 세그먼트가 마지막으로 생성된 파일까지 트랜잭션 로그의 레코드를 순차적으로 읽어 복구를 수행함. 
+
+* 체크포인트 레코드를 통해 pg_wal 디렉토리에서 복구에 필요한 WAL 세그먼트 파일을 찾고,
+  * 세그먼트 파일에서 저장된 체크포인트 레코드를 검색해 저장된 Redo 포인트의 위치를 찾음
+  * 이 이후 마지막으로 생성된 WAL 세그먼트 파일까지 트랜잭션 레코드를 순차적으로 읽어 복구 수행
+
+# 2장 트랜잭션과 MVCC
+
+Postgresql은 MVCC로 트랜잭션 읽기 일관성을 제공한다. 트랜잭션 시점에 맞는 스냅샷 범위에 해당하는 데이터만 볼 수 있도록 허용한다.
+
+이를 위해 하나의 튜플에 여러 버전의 이미지를 생성하고 트랜잭션 ID를 부여한다.
+
+이전버전의 튜플은 데드 튜플이라 하고, 데드 튜플이 많을수록 테이블, 인덱스 크기가 증가하게 된다.
+
+어느 트랜잭션에서도 참조하지 않는 데드 튜플은 Vacuum에 의해 제거된다.
+
+## 1. 트랜잭션 격리 수준
+
+### 1.1 Postgresql의 격리 수준
+
+postgresql은 여러 버전이 존재하는 MVCC를 적용해 스냅샷을 기반으로 한다. 
+
+기본 격리 수준은 Read commited. 
+
+스냅샷을 기반으로 하는 격리 수준은, DB에서 허용하는 표준 격리 수준과 다르게 좀 더 엄격하여 Dirty Read를 허용하지 않는다.
+
+* **Dirty Read(더티 리드)**란, 한 트랜잭션이 아직 커밋되지 않은 다른 트랜잭션의 변경 사항을 읽어오는 현상
+
+## 2. 데이터 저장 구조
+
+### 2.1 페이지 구조
+
+페이지 단위로 데이터를 저장하고, 테이블을 이런 페이지들의 집합으로 Heap이라고 부름.
+
+<img src="./images//image-20250304124312766.png" width = 450>
+
+#### Page Header
+
+페이지 시작부분에 위치, 크기는 24바이트 고정.
+
+트랜잭션ID, 튜플 ID, 데이터 오프셋, 체크섬 등 다양한 정보 저장
+
+#### item
+
+실제 데이터 저장 영역. 테이블 페이지에서 튜플을 의미하고, 인덱스 페이지에서는 인덱스 엔트리를 의미 
+
+테이블 페이지의 경우 MVCC가 적용되어 하나의 동일 레코드에 여러 버전이 있어, 튜플이 아닌 튜플 버전으로 이해해야 한다.
+
+#### item pointer
+
+itemid라고 하는데, 배열 형태로 관리되며 페이지 목차이다. 실제 item을 인식하는 정보를 가짐.
+
+4바이트로 구성되며 item의 오프셋과 길이 형태의 쌍으로 물리적 위치 저장.
+
+새로운 item이 추가될 때마다 해당 item을 가리키는 itemid가 배열에 추가되도록 구성.
+
+item 영역을 페이지 시작부터 오프셋 구성으로 참조할 수 있다. 직접주소, 간접주소를 따로 관리한다.
+
+* 간접 주소 : 페이지 번호와 itemid의 색인으로 이루어진 것. TID라고 부름
+  * (n,m)으로 n번째 페이지의 m번째 itemid를 가리킴. item의 (offset, length)를 이용해 item 특정 가능
+
+![image-20250304125522376](./images//image-20250304125522376.png)
+
+#### Free Space
+
+Free Space Map, 아무것도 할당되지 않은 여유 공간. 새로운 itemId는 이 공간에 시작부터, item은 끝부터 채워짐.
+
+여기가 다 차면 새 페이지를 추가하게 됌. 다음 페이지를 쓰는것
+
+#### Special space
+
+페이지 끝부분에 있으며 가장 높은 주소값. 
+
+페이지 번호, 페이지 유형, 트리 레벨, 페이지 연결 목록 등 인덱스용 페이지 파일에만 사용됌.
+
+일부 인덱스와 테이블 페이지 에서는 이 영역의 크기는 0임. 
+
+예를들어 btree에는 특수 구조의 메타데이터 페이지와 테이블 페이지와 유사한 일반 페이지가 있따.
+
+### 2.2  Transaction ID
+
+튜플은 MVCC에 따라 여러 버전이 존재하는데, 이를 구분하는 기준이 트랜잭션 ID이다.
+
+트랜잭션 ID = XACT ID = TXID = XID 다 같은 용어
+
+32비트 정수로 표현되며, 모든 트랜잭션이 시작될때마다 1씩 할당되면서 총 43억번까지 증가함. 
+
+* 초당 1000번의 트랜잭션 발생할 경우 6주동안에 모든 트랜잭션 ID가 소진됌.
+
+이런 문제 때문에 모두 소진되면 순환되어 다시 앞번호부터 시작하는데, 이를 XID Wraparound라고 함.
+
+논리적인 Age(나이) 개념을 적용하며 Anti-Wraparound XID 라는 과정을 통해 관리함.
+
+```sql
+현재 시점의 트랜잭션 id 확인 방법
+select pg_current_xact_id()
+
+select txid_current()
+
+-- 조회할때마다 늘어남 
+```
+
+튜플에 대한 변경이 일어날 때 XID을 통해 시작 지점을 표시한다.
+
+* 시작시점과 변경된 시점을 비교하여, 가시성을 적용하여 읽기 일관성을 유지하기 위함.
+
+데이터베이스, 테이블, 튜플 단위에서 표현되는 XID는 다음과 같다.
+
+- ﻿﻿bootstrap XID : initdb0 시에 할당하는 XID, 값은 항상 1이다.
+- ﻿﻿Frozen XID : Anti-Wraparound Vacuum을 위해 적용하는 XID, 값은 2이다.
+- ﻿﻿normal XID : 트랜잭션이 사용하는 XID, 3부터 시작한다.
+- ﻿﻿datfrozenxid : 데이터베이스 생성시 template1 데이터베이스의 XID로 설정
+                           데이터베이스의 테이블 중 가장 Age가 높은 테이블의 XID로 변경
+- ﻿﻿relfrozenxid : 테이블 생성 시점의 XID, Vacuum에 의해 테이블이 Frozen 된 시점의 XID로 변경
+- ﻿﻿xmin, xmax : 튜플이 입력되거나 수정된 시점의 XID를 튜플 단위로 할당
+
+#### 가상 트랜잭션 (virtual transactions)
+
+트랜잭션을 절약하기 위해, 읽기 전용 같은 트랜잭션은 백엔드 프로세스 ID와 일련번호로 구성된 가상 XID를 부여.
+
+매우 빠르게 수행되며 실제 XID가 없음. 그리고 가상 XID는 메모리에만 존재하고 페이지나 디스크에는 기록되지 않음.
+
+### 2.3 튜플 구조
+
+튜플은 헤더와 실제 데이터로 구성됌. 헤더는 MVCC용 트랜잭션 ID를 통한 튜플 버전 정보와 속성 등 정보등이 있음
+
+튜플 헤더 구조
+
+![image-20250304131049978](./images//image-20250304131049978.png)
+
+| 구분          | 타입            | 길이    | 설명                                                         |
+| ------------- | --------------- | ------- | ------------------------------------------------------------ |
+| `t_xmin`      | TransactionId   | 4 bytes | Insert된 튜플에 할당되는 xid                                 |
+| `t_xmax`      | TransactionId   | 4 bytes | Deleting or locking for xid, 변경되지 않을 경우 0            |
+| `t_cid`       | CommandId       | 4 bytes | 트랜잭션 내에서 수행된 DML에 부여되는 명령어 번호 (commandid) |
+| `t_xvac`      | TransactionId   | 4 bytes | 튜플 버전을 이동하는 Vacuum 작업을 위한 xid                  |
+| `t_ctid`      | ItemPointerData | 6 bytes | 튜플 버전 또는 최신 튜플 버전의 현재 tid동일한 행의 다음 업데이트 버전에 대한 포인터 정보, 업데이트가 없으면 자신의 tid 정보를 의미 |
+| `t_infomask2` | uint16          | 2 bytes | 속성 수와 다양한 flag bit                                    |
+| `t_infomask`  | uint16          | 2 bytes | 버전 속성을 표시하는 flag bit                                |
+| `t_hoff`      | uint8           | 1 byte  | 사용자 데이터 offset                                         |
+
+- ﻿﻿xmin, xmax는 트랜잭션 ID를 의미한다. 이들은 동일 튜플의 버전을 구별하는데 사용된다.
+- ﻿﻿infomask는 버전 속성을 정의하는 일련의 정보 비트를 제공한다.
+- ﻿﻿ctid는 동일한 행의 다음 업데이트 버전에 대한 포인터 역할을 한다.
+- ﻿﻿nul 비트맵은 null값을 포함할 수 있는 열을 표시하는 비트 배열을 의미한다.
+
+필드의 순서가 타입에 따라 정렬되도록 테이블을 다시 생성하면 저장 공간을 더 효율적으로 사용하게 된다.
+
+* ex -> create table (int boolean int boolean) 보다 int int boolean boolean이 더 용량이 적음
+
+일반적으로 **큰 크기의 필드를 먼저 배치**하고, 작은 크기의 필드를 나중에 배치하면 메모리 패딩이 줄어들어 저장 공간을 절약할 수 있다. 
+
+* **User Data 영역**에 컬럼 데이터가 들어가는데,
+
+* **PostgreSQL은 각 데이터 타입의 크기에 맞춰 메모리를 정렬(Alignment)하려고 함**.
+
+  데이터 크기가 맞지 않으면 **패딩(Padding, 여유 공간)이 자동으로 추가됨**.
+
+* CPU는 메모리를 효율적으로 읽기 위해 정렬을 요구
+
+  * 대부분의 CPU는 **2바이트, 4바이트, 8바이트 등의 정렬 기준에 맞게 메모리를 읽음**.
+  * 데이터가 **정렬되지 않으면** CPU가 데이터를 읽을 때 **여러 번 접근해야 해서 성능이 저하**됨.
+  * 따라서, **RDBMS는 데이터 타입 크기에 따라 패딩을 추가하여 올바르게 정렬하려고 함**.
+
+```
+CREATE TABLE inefficient_table (
+    flag BOOLEAN,          -- 1 byte
+    small_number SMALLINT, -- 2 bytes
+    big_number BIGINT,     -- 8 bytes
+    mid_number INTEGER     -- 4 bytes
+);
+```
+
+### 📌 **메모리 배치 과정**
+
+| 필드명          | 크기 | **시작 위치** | **정렬 조건 만족 여부**                         | **패딩 추가 여부** |
+| --------------- | ---- | ------------- | ----------------------------------------------- | ------------------ |
+| `flag`          | 1B   | **0**         | ✅ 정렬됨                                        |                    |
+| **(패딩 추가)** | -    | **1**         | ❌ `small_number`(2B)는 **2의 배수에 있어야 함** | **+1B**            |
+| `small_number`  | 2B   | **2**         | ✅ 정렬됨                                        |                    |
+| **(패딩 추가)** | -    | **4**         | ❌ `big_number`(8B)는 **8의 배수에 있어야 함**   | **+4B**            |
+| `big_number`    | 8B   | **8**         | ✅ 정렬됨                                        |                    |
+| `mid_number`    | 4B   | **16**        | ✅ 정렬됨                                        |                    |
+
+🔹 **총 패딩 추가: 1B (small_number 앞) + 4B (big_number 앞) = 5B 낭비!**
+
+### 2.4 튜플 버전
+
+튜플이 입력되거나 변경될때마다 동일 튜플에 대해 xmin, xmax 두 값을 저장함.
+
+insert 되면 xmin 값은 현재 시점의 XID로 되고, xmax 는 0
+
+delete 되면 xmin은 그대로고 xmax는 delete 시점의 XID
+
+update 는 delete -> insert와 같아서 update시 delete 과정과 동일한 상태가 됌. 
+
+* xmin은 그대로고 xmax가 update 시점 XID로 변경
+* 변경후의 튜플은 새로운 튜플로 insert 되어 xmax는 0이됌 
+
+### 2.5 인덱스와 튜플
+
+인덱스는 튜플처럼 버전 관리를 하지 않아서 여러 버전이 없음.
+
+## 3 스냅샷
+
+### 3.1 스냅샷이란
+
+트랜잭션 시점에 따른 여러 튜플이 존재하기 때문에 스냅샷을 사용함.
+
+**트랜잭션 시작시 스냅샷은 자동으로 생성된다.**
+
+ 현재 스냅샷 이전 커밋된 데이터는 볼 수 있꼬, 시작 시점까지 커밋되지 않은 데이터는 볼 수 없음.
+
+* A 트랜잭션이 스냅샷을 생성할 때 활성중인 B 트랜잭션은 이 스냅샷을 볼 수 없다.
+
+![image-20250304133416872](./images//image-20250304133416872.png)
+
+- ﻿﻿Read committed 격리 수준에서 스냅샷은 각 쿼리의 시작 단계에서 생성되고 쿼리 수행 기간 동안에만 활성 상태를 유지한다.
+- ﻿﻿Repeatable read와 serializable 격리 수준에서 스냅샷은 트랜잭션의 첫 번째 쿼리가 시작될 때 생성되고 전체 트랜잭션이 완료될 때까지 활성 상태로 유지된다.
+
+### 3.2 스냅샷과 튜플 가시성
+
+스냅샷에서 튜플 가시성 여부는 트랜잭션 id인 xmin, xmax 가상 컬럼과 해당 힌트 비트로 정의됌.
+
+트랜잭션이 스냅샷 생성 전 이미 커밋된 경우 변경 사항이 스냅샷에 표시됌.
+
+스냅샷을 생성한 자체 트랜잭션은 커밋 되지 않은 변경 사항도 볼 수 있음. 
+
+트랜잭션 시작 지점은 xmin 값을 통해 알 수 있지만, 완료 여부는 튜플 헤더 어디에도 기록되지 않음.
+
+따라서 스냅샷이 생성된 순간 특정 트랜잭션이 활성 되었는지 여부를 파악할 수 없기 때문에, 
+
+스냅샷은 현재 활성화된 모든 트랜잭션의 목록을 저장해야 함. 
+
+![image-20250304134721506](./images//image-20250304134721506.png)
+
+- ﻿﻿T1 트랜잭션은 스냅샷 생성 당시 활성 상태이므로 변경 사항이 스냅샷에 표시되지 않는다.
+  - T3 트랜잭션이 스냅샷을 생성할 때, T1 트랜잭션은 활성중이여서 볼 수 없음. 
+- ﻿﻿T2 트랜잭션은 스냅샷 생성 전에 커밋되어 변경 사항이 스냅샷에 표시된다.
+  - T3 트랜잭션은 T2의 변경사항을 볼 수 있음. 
+- ﻿﻿T4 트랜잭션은 스냅샷 생성 후 시작되어 완료 여부에 관계없이 스냅샷에 표시되지 않는다.
+  - T4 트랜잭션은 스냅샷의 변경내용을 볼 수 있지만, T3에서는 T4를 볼수 없음. 
+
+스냅샷 생성시 저장되는 정보는 다음과 같다.
+
+- ﻿﻿snapshot.xmin - xmin은 스냅샷의 최소 경계이며 가장 오래된 활성 트랜잭션 ID로 표시된다.
+   더 작은 ID를 가진 모든 트랜잭션은 커밋 되어 변경 사항이 스냅샷에 보이거나 또는 롤백 되어 변 경 사항이 무시된다.
+- ﻿﻿snapshot.xmax - xmax는 스냅샷의 상한 경계로서 최근 커밋 된 트랜잭션 ID에 1을 더한 값으 로 표현된다. 상한 경계는 스냅샷이 찍힌 순간을 정의한다. XID가 xmax 이상인 모든 트랜잭션 은 여전히 실행 중이거나 존재하지 않아 변경 사항을 볼 수 없다.
+- ﻿﻿snapshot.xip_list - xip_ist는 튜플 가시성에 영향을 주지 않는 가상 트랜잭션을 제외한 모든 활성 트랜잭션 ID 목록을 저장하고 활성 상태인 트랜잭션 변경 사항은 볼 수 없다.
+
+### **튜플(행)의 주요 MVCC 필드**
+
+| 필드명          | 설명                                                     |
+| --------------- | -------------------------------------------------------- |
+| `xmin`          | 이 튜플을 **INSERT**한 트랜잭션의 ID                     |
+| `xmax`          | 이 튜플을 **DELETE/UPDATE**한 트랜잭션의 ID (없으면 `0`) |
+| `xip_list`      | 현재 활성(실행 중) 트랜잭션 목록                         |
+| `snapshot_xmin` | 현재 활성 트랜잭션 중 가장 작은 `xmin`                   |
+| `snapshot_xmax` | 현재 활성 트랜잭션 중 가장 큰 `xmin` + 1                 |
+
+**📌 핵심 개념**
+
+- `xmin` → 해당 튜플을 **삽입한 트랜잭션 ID**
+- `xmax` → 해당 튜플을 **삭제(또는 업데이트)한 트랜잭션 ID**
+- `xip_list` → **현재 실행 중인 트랜잭션 목록**
+
+- ﻿﻿xid < xmin이면 변경 사항이 무조건 보여진다.
+- ﻿﻿xmin <=xid < xmax인 경우 XID가 활성 상태 목록인 xip_list에 없는 경우에만 변경 사항이 보여진다.
+
+**(1) 트랜잭션 XID가 `xmin`보다 크면 변경 사항이 무조건 보임**
+
+📌 **현재 트랜잭션 `XID = K`가 존재할 때**
+
+```
+SELECT * FROM my_table;
+```
+
+| 튜플(`xmin`) | 현재 `XID (K)` | 결과                                        |
+| ------------ | -------------- | ------------------------------------------- |
+| `xmin = 5`   | `K = 10`       | ✅ 보임 (변경 사항 반영됨)                   |
+| `xmin = 15`  | `K = 10`       | ❌ 안 보임 (미래의 트랜잭션이 생성한 데이터) |
+
+🚀 **즉, `xmin`이 현재 트랜잭션 `XID`보다 작으면 데이터가 보인다.**
+
+(2) `xmin ≤ xid < xmax` 이고 `xid`가 `xip_list`(활성 상태 목록)에 없으면 보임
+
+**이해하기 쉽게 예제와 함께 살펴보자!**
+
+#### **📌 예제 상황**
+
+| 트랜잭션 | `xmin` | `xmax` | 현재 `xid` | `xip_list` (활성 트랜잭션 목록) | 결과                                                    |
+| -------- | ------ | ------ | ---------- | ------------------------------- | ------------------------------------------------------- |
+| `T1`     | `5`    | `15`   | `10`       | `{12, 14}`                      | ✅ 보임                                                  |
+| `T2`     | `8`    | `12`   | `10`       | `{12, 14}`                      | ❌ 안 보임<br /> (`12`가 실행 중이므로 삭제 여부 불확실) |
+| `T3`     | `15`   | `0`    | `10`       | `{12, 14}`                      | ❌ 안 보임<br /> (`xmin=15`이므로 미래 데이터)           |
+
+🔹 **설명**:
+
+- **`xmin ≤ xid < xmax`** → 이 범위에 속하면 **UPDATE 또는 DELETE된 행일 가능성이 있음**.
+- 만약 **`xmax`에 해당하는 트랜잭션이 `xip_list`(활성 트랜잭션 목록)에 포함되지 않았다면**
+  → `xmax` 트랜잭션이 **완료된 상태**이므로 해당 데이터는 **삭제됨**.
+- 반대로, `xmax` 트랜잭션이 **아직 활성 상태(xip_list에 포함)**라면 → **변경 여부가 확정되지 않아서 보이지 않음.**
+
+### **트랜잭션 가시성 기본 규칙**
+
+
+
+| 조건                                                         | 가시성 결과 | 설명                                                         |
+| ------------------------------------------------------------ | ----------- | ------------------------------------------------------------ |
+| **현재 트랜잭션 ID(XID)보다 `xmin`이 작거나 같으면 보인다.** | ✅ 보인다    | **해당 튜플이 현재 트랜잭션보다 이전 또는 같은 트랜잭션에서 생성된 경우 볼 수 있음.** |
+| **현재 트랜잭션 ID(XID)보다 `xmin`이 크면 보이지 않는다.**   | ❌ 안 보인다 | **해당 튜플이 아직 생성되지 않은 미래의 트랜잭션에서 INSERT된 데이터이므로 보이지 않음.** |
+| **현재 트랜잭션 ID(XID)보다 `xmax`가 크거나 `0`이면 보인다.** | ✅ 보인다    | **튜플이 삭제되지 않았거나, `xmax`가 현재 트랜잭션보다 미래의 XID이므로 삭제가 확정되지 않음.** |
+| **현재 트랜잭션 ID(XID)가 `xmax`보다 작고, `xmax` 트랜잭션이 COMMIT되었으면 보이지 않는다.** | ❌ 안 보인다 | **이 튜플을 DELETE/UPDATE한 트랜잭션이 현재 트랜잭션보다 앞에서 COMMIT되었으므로 삭제가 확정됨.** |
+| **현재 트랜잭션 ID(XID)가 `xmax`보다 작지만, `xmax`가 `xip_list`에 있으면 보인다.** | ✅ 보인다    | **이 튜플을 DELETE/UPDATE한 트랜잭션이 아직 COMMIT되지 않아서 삭제가 확정되지 않음.** |
+
+* `xip_list`는 **현재 실행 중인 트랜잭션 목록**을 저장하여, **아직 COMMIT되지 않은 삭제나 업데이트를 반영하지 않도록 함.**
+* `xmax`가 현재 트랜잭션보다 작아도, `xip_list`에 존재하면 아직 삭제가 확정되지 않아서 볼 수 있음.
+* 트랜잭션이 COMMIT되면 `xip_list`에서 제거되고, 삭제가 확정되어 보이지 않음.
+
+### 3.3 스냅샷과 데이터베이스 Horizon
+
+스냅샷의 최소 경계는 xmin으로 표현되는데 이는 스냅샷 생성 다시 활성화된 가장 오래된 트랜잭션 ID (insert시 생성되므로). 이를 이용해 데이터베이스 안에서 모든 트랜잭션 중 가장 오래된 xmin 값을 트랜잭션을 선택하고
+
+해당 xmin 이하의 값을 가지는 오래된 튜플들은, 어떤 트랜잭션에서도 참조하지 않으므로 Vaccum으로 정리될 수 있다.
+
+이와 반대로, xmin 이상의 값을 가진 튜플들은 아직 참조 가능한 버전이 포함되어 있어 vacuum으로 제거할 수 없다.
+
+튜플의 가시성의 기준이 되는 모든 트랜잭션 중 가장 오래된 xmin 값을 데이터베이스 horizon 이라고 한다.
+
+**데이터베이스 Horizon 값은 pg_stat_activity 테이블의 backend_xmin 값으로 표시되고 다음과 같 은 규칙을 따른다.**
+
+```sql
+select backend_xmin from pg_stat_activity
+```
+
+- ﻿﻿현재 데이터베이스에 존재하는 모든 세션의 backend_xid 값 중 가장 낮은 값을 backend_
+   xmin으로 정의한다.
+- ﻿﻿현재 데이터베이스에 트랜잭션을 수행 중인 세션이 자신만 존재할 경우 트랜잭션 시작 시점의 XID 값을 backend_xid 및 backend_xmin으로 정의한다.
+
+정리하면 데이터베이스 Horizon으로 표현되는 **backend_xmin**은 데이터베이스에서 오직 하나만 존 재할 수 있고, <u>backend_xmin을 생성한 트랜잭션이 종료되어야만 다른 트랜잭션에 의해 horizon이 더 큰 값으로 변경될 수 있다</u>. 
+
+이를 통해 이전에 불가했던 데드 튜플에 대한 Vacuum이 가능하게 된다.
+
+* 제대로 Vaccum이 수행되지 못하면 세션 목록 상태를 살펴서 idle in transaction 상태로 오래 남아 있는 세션들은 상태를 확인하고 정리해야 한다. 
+
+방법 1
+
+* idle_in_transaction_session_timeout 값을 수정하여 기본값은 0이고 무제한이다. 이걸 트랜잭션 최대 가능 시간을 고려하여 적정한 값으로 변경
+
+방법2
+
+쿼리로 조회
+
+```sql
+SELECT pid, age(now(), xact_start) AS transaction_duration, state, query
+FROM pg_stat_activity
+WHERE state = 'idle in transaction'
+ORDER BY xact_start ASC;
+
+아래 는 결과
+
+4428,0 years 0 mons 0 days 0 hours 0 mins 21.80712 secs,idle in transaction,SHOW TRANSACTION ISOLATION LEVEL
+4175,0 years 0 mons 0 days 0 hours 0 mins -45.462835 secs,idle in transaction,SHOW TRANSACTION ISOLATION LEVEL
+
+SELECT pg_terminate_backend(4428);
+SELECT pg_terminate_backend(4175);
+
+VACUUM ANALYZE;
+```
+
+이후 찾아서 종료
+
+```sql
+특정 세션(pid) 강제 종료
+먼저, pg_stat_activity에서 오래된 트랜잭션을 조회하여 해당 pid를 확인한다.
+다음 명령어로 해당 트랜잭션을 종료할 수 있다.
+
+SELECT pg_terminate_backend(12345);  -- `pid`를 해당 세션의 `pid` 값으로 변경
+🔹 이 명령어를 실행하면 해당 트랜잭션이 즉시 강제 종료되며, 관련된 모든 잠긴 리소스가 해제됨.
+```
+
+
+
+### 3.5 Snapshot too old
+
+오랜 시간 수행중인 쿼리 스냅샷에서 특정 데드 튜플 조회시, 쿼리 종료까지 튜플은 바큠으로 지울 수 없다.
+
+이는 테이블 인덱스 크기에 영향을 미친다.
+
+이 문제에 대비해 old_snapshot_threshold 파라미터로, 이 시간만큼 스냅샷을 보장하고 경과되면 데드 튜플을 정리할 수 있다.
+
+* 적용은 분 단위로 0 ~ 86400 까지 가능
+
+## 4. 단일 페이지 정리와 HOT 업데이트
+
+### 4.1 FillFactor
+
+Fillfactor : 충전율.
+
+한 페이지 안에 튜플 저장할 때 차지하는 비율을 백분율로 표시.
+
+Fillfactor가 100이면 한 페이지에 꽉채워서 튜플을 저장, 50이면 절반만 채우고 50은 빈영역으로 두는것.
+
+빈 영역은 업데이트시 새로 변경된 튜플이 위치하는 영역으로 활용됌.
+
+* 기본값은 테이블은 100, 인덱스는 90
+
+필요한 이유는 **업데이트가 빈번할 때 생성되는 데드 튜플에 대 한 효과적인 처리**와 이러한 튜플을 참조하는 인덱스 크기 확장을 막기 위해서.
+
+테이블 레벨에 적용할 수 있고, 수정하는 경우 새 추가되는 튜플부터 비율에 따라 저장됌
+
+```
+alter table t set(fillfactor=70);
+```
+
+### 4.2 단일 페이지 정리(Single Page Cleanup, In page Vaccum)
+
+PostgreSQL은 오라 클처럼 UNDO가 따로 존재하지 않기 때문에 동일 튜플에 대해 트랜잭션 시점마다 생성된 여러 개의 튜플 버전으로 읽기 일관성을 보장한다.
+
+Vaccum 작업은 테이블 단위로 수행되기 때문에, 업데이트가 빈번한 대용량 테이블의 경우 데드 튜플이 많아져 부담이 커진다.
+
+이를 위해 PG는 동일 페이지 안에서 트랜잭션에서 참조하지 않는 데드 튜플을 빠르게 제거하는 단일 페이지 정리를 적용하게 되었다.
+
+쓰기작업 수행할 때, 불필요한 데드 튜플에 대한 정리가 발생한다. 
+
+* 동작 방식 : Vaccum보다 가볍고 WAL 로그도 생성하지 않음.
+
+* Update나 select 수행시 페이지 공간이 부족하다고 인식되면 그때도 수행됨
+
+
+
+## 4.3 Hot(Heap Only Tuple) Update
+
+업데이트 되는 컬럼에 인덱스가 존재한다면, 생성되는 튜플 버전마다 인덱스 포인터를 축해야 해서 인덱스 크기도 커진다.
+
+B-Tree 인덱스는 인덱스 페이지에 새 튜플을 입력한 공간이 충분치 않을 경우 페이지를 분할하고 모든 데이터가 분할된 영역으로 분산된다. 페이지가 분할되면 데이터가 삭제되어도 두 개의 페이지는 하나로 병합되지 않는다.
+
+이때문에 데이터가 상당히 삭제되어도 인덱스 크기는 줄어들지 않는다.
+
+업데이트 되는 컬럼이 인덱스가 아니라면, 이를 참조하는 인덱스 포인터를 포함하는 btree 행을 만드는것은 불필요한 작업이 된다. 
+
+PG는 업데이트 대상 컬럼으로 인덱스가 존재하지 않으면, 이런 불필요한 인덱스 포인터 생성을 피하기 위한 대안으로 HOT 업데이트 최적화 기능을 제공한다.
+
+튜플을 업데이트 할때, 튜플의 변경 전후 이미지가 한 페이지 안에 존재하고, 인덱스 페이지에는 변경이 발생하지 않고 테이블 페이지에만 발생하는것을 의미한다.
+
+```
+인덱스 페이지 조회
+select itemoffset, ctid, dead from bt_page_items('t1_name', 1);
+```
+
+정리하면 HOT 업데이트가 발생하기 위한 조건은 다음과 같다.
+
+- ﻿﻿업데이트 시 변경 전, 후 튜플 버전이 동일 페이지 안에 있어야 한다.
+   이를 위해 변경 후 튜플 버전이 생성될 공간 확보를 위해 적절한 Filfactor 설정이 필요하다.
+- ﻿﻿업데이트 대상 컬럼으로 인덱스가 생성되어 있지 않아야 한다.
+- ﻿﻿업데이트 결과 생성된 튜플 버전마다 인덱스 포인터가 생성되지 않는다.
+
+HOT 업데이트 적용 위해선 적절한 Fillfactor 설정이 필요하다.
+
+* 페이지안에 업데이트 공간을 확보해서 튜플 변경 전후 버전이 동일 페이지 안에 있게 할 확률을 높이기 위함.
+  * 다른페이지로 바뀌면 인덱스 포인터가 바뀜;;
+
+Fill factor 값을 무조건 작게 설정하면 한 페이지에 저장되는 튜플의 수가 제한되어 물리적 크기가 커지는것도 알아야함.
+
+Fill Factor가 작을수록 업데이트를 위한 여유공간이 있으면 HOT 업데이트 가능성이 높아 초당 처리량이 증가.
+
+Fillfactor 값이 100일 때보다 75, 50일 때 초당 처리량이 2배 가까이 증가한다. 75일 때와 50은 거 의 비슷한 수준의 처리량을 보이고 있어 초기 테이블 크기를 고려한다면 Fillfactor를 75로 설정하는 것이 가장 적절해 보인다.
+
+* 책 148쪽 수치 확인할것.
+
+업데이트가 빈번한 테이블인 경우 FillFactor 수치를 50~75로 고려해보자. 
+
+테이블, 인덱스 크기가 조절되면 SQL 수행 시 그만큼 10가 감소하므로 성능 개선에도 도움이 될 뿐만 아니라 처리해야 할 데드 튜플도 줄어들게 되어 Vacuum 작업도 가벼워진다.
+
+## 5. MVCC
+
+### 5.1 MVCC란
+
+다중 버전 동시성 제어, 동시다발적인 트랜잭션 처리에 상호 간섭 으로부터 일관성을 보호하기 위한
+
+방법은 2가지
+
+1. PG 방식으로, 데이터 변경 전후 이미지를 페이지에 동시에 저장하는 멀티 제너레이션 방식
+
+데이터 변경시 이전 데이터 두고 변경된 데이터는 신규로 추가되어 스냅샷 보장하는 한계에서 읽기 일관성 제공
+
+단, 변경시 물리적 위치도 변경되어 인덱스가 동시에 커질 수 있음. 때문에 이전 데이터를 저장하고 저장공간을 확보하기 위한 Vaccum 방식이 필요
+
+2. Undo 방식
+
+데이터 변경시 기존 데이터를 신규 데이터로 변경하고, 이전 이미지는 Undo 세그먼트에 저장.
+
+조회 발생 시점의 System Commit Number를 데이터 파일 SCN과 피교하여 작다면 Undo 세그먼트 활용하여 조회,
+
+크다면 조회 시점의 블록을 생성하여 읽음.
+
+
+
+PG같은 멀티 제너레이션에서는 다음과 같은 규칙이 필요.
+
+- ﻿﻿튜플 단위로 입력되거나 변경되는 시점의 트랜잭션 ID를xmin, xmax 값으로 적용하여 튜플 버 전을 관리한다.
+- ﻿﻿트랜잭션 ID는 약 43억 개(4,294,967,296)까지만 생성된다.
+- ﻿﻿튜플의 데이터를 보기 위해서는 읽는 시점의 트랜잭션 ID보다 읽는 대상인 튜플의 xmin 값이 작 거나 같아야 한다.
+
+### 5.2 XID 순환구조와 Frozen XID - 중요!
+
+MVCC를 위해 XID를 사용하는데, 43억개 뿐이다. 트랜잭션은 이보다 훨씬 많을 수 있다.
+
+이때문에 43억개 모두 소진시 처음으로 돌아가 다시 앞번호부터 순환되는데 이를 XID Wraparound라고 한다.
+
+현재 트랜잭션은 자신보다 작거나 같은 XID를볼수있어야 하는데, XID가 순환되고 XID가 100이면, 이전 43억인 데이터는 과거에 존재했지만 볼 수 없다.
+
+따라서 XID가 순환(Wraparound) 되기 전 XID = 43억인 데이터는 내부적으로 XID=2로 보이도록 하여 어느 트랜잭션에서나 자신보다 작은 XID로 인식되도록 Freeze(고정) 해줘야 한다. 이를 FrozenXID라고 한다.
+
+* 이 과정을 Anti-Wraparound XID
+
+- ﻿﻿Bootstrap XID : initdb0 시에 할당하는 XID, 값은 항상 1이다.
+- ﻿﻿Frozen XID : Anti-Wraparound Vacuum을 위해 적용하는 XID, 값은 2이다.
+- ﻿﻿Normal XID : 트랜잭션이 사용하는 XID, 3부터 시작한다.
+
+PG는 43억개 XID를 현재 XID 기준으로 반으로 나누어 Older, Newer 영억으로 구분한다.
+
+Older는 과거 발생한 읽기 일관성용, Newer는 미래에 발생할 트랜잭션을 위한 XID
+
+43억개 전부 소진할떄까지 경계 두기보단, 21억개까지 소진되어 Newer 영역으로 넘어가기전을 XID가  Wrap 되는 기준으로 잡는것이 더 정확하다 할 수 있다.
+
+1회전의 절반인 21억 XID에 가까워지기전 오래된 XID를 가진 튜플은 항상 볼 수 있도록 Frozen XID로 적용해야 한다.
+
+![image-20250304150942533](./images//image-20250304150942533.png)
+
+- ﻿﻿XID=100인 시점에 생성된 튜플은 앞으로 튜플의 내용이 변경되지 않고 XID가 21억 개 소진되 기 전까지는 Older 영역에 속하여 계속 Visible 상태가 된다.
+- ﻿﻿해당 시점을 기준으로 앞으로 21억 개 XID가 소진된 이후에는 기존에 Older 영역에 속하였다가
+   Newer 영역으로 이동되어 Invisible 상태가 된다.
+- ﻿﻿Newer 영역으로 이동된 튜플은 읽기 일관성을 보장할 수 없기 때문에 21억 개의 XID가 전부 소 진되기 전에 XID=100인 튜플은 Frozen XID가 적용된다.
+- ﻿**﻿**Frozen 상태의 튜플은 xmin 값을 그대로 유지하는 대신, Ver 9.6부터 힙 페이지의 t_infomask**
+   **가상 컬럼의 10번째 비트가 0에서 1로 변경되고 튜플의 내용이 변경되지 않는 한 항상 Visible**
+   영역에 존재하게 되어 모든 스냅샷에서 볼 수 있도록 보장된다.**
+-  즉, 과거 ver 9.4 이전에는 튜플의 xmin 값을 XID중 가장 작은 XID=2로 고정해 놓는 것과 동일 한 개념이라고 할 수 있다.
+
+**Frozen XID의 원리**
+
+ **Frozen XID의 핵심 원리는 `t_infomask` 필드에 저장되는 "Frozen" 플래그(`HEAP_XMIN_FROZEN`)를 통해 작동**
+단순히 `xmin = 2`로 바뀌는 게 아니라, **튜플의 `t_infomask`가 변경되어 Frozen 상태를 나타내는 방식***
+
+## 5.3 Age
+
+Frozen XID 시점을 계싼하기 위해 Age 개념을 적용
+
+> Age = Current XID - (table or row) 생성시점의 xid
+
+순차적으로 증가하는 XID 값 자체보다는, 튜플 테이블 생성 시점에 XID가 적용되고 트랜잭션이 발생할때마다 Age가 1씩 증가하면서 현재 튜플 버전이 얼마나 오래된것인지 Age를 측정하여 freeze 시점을 계산.
+
+* DB 관점에선 1건 트랜잭션당 DB, 테이블, 튜플의 Age가 동시에 1씩 증가. 
+
+조회 방법
+
+```
+select relname, age(relfrozenxid) age, relfrozenxid from pg_class where relname= 't1'
+```
+
+* 테이블 생성시 해당 시점의 XID가 테이블의 relfronzenxid, age는 1
+* 트랜잭션 발생시 동일 시점의 XID가 튜플의 xmin, Age는 1씩 적용되어 테이블 Age = 2, 튜플 =1
+* 또 추가하게 되면 이미 생성된 튜플과 테이블은 1씩 증가함
+
+이렇게 테이블 튜플 age 계산하는 이유는 Frozen XID를 적용하는것이 목적.
+
+이렇게 해서 Age가 많은 오래된 튜플에 대한 가시성을 보장할 수 있기 때문.
+
+* PostgreSQL에서 `age()` 함수는 두 시점(혹은 XID) 사이의 차이를 계산합니다.
+  주로 **현재 XID와 튜플의 XID 또는 데이터베이스의 datfrozenxid 사이의 차이**를 나타내어,
+  "이 데이터(또는 데이터베이스)가 얼마나 오래되었는지"를 확인할 때 사용
+
+
+
+정리하자면
+
+age가 계속 증가하다가 age 관련 특정 파라미터의 임계치에 도달하면 Transaction ID Wraparound를 방지하기 위한
+Anti Wraparound Vacuum의 대상이 되고
+Anti Wraparound Vacuum이 수행된 후에는 테이블과 Tuple의 age가 다시 젊어짐. freezing.
+
+
+
+1. PostgreSQL의 autovacuum 프로세스가 주기적으로 VACUUM을 실행하는데,
+   이때 특정 임계치(예: autovacuum_freeze_max_age에 설정된 XID 차이)를 넘은 튜플에 대해 VACUUM FREEZE를 포함한 작업을 수행
+
+2. VACUUM FREEZE는 각 튜플의 생성 시점(XID, 즉 xmin)과 현재 데이터베이스의 기준 XID(datfrozenxid)를 비교
+
+   **age() 함수 사용:**
+
+   - `age(xid)` 함수는 현재 XID와 튜플의 xmin 사이의 차이를 계산합니다.
+   - 이 차이가 설정된 임계치(예: autovacuum_freeze_max_age)를 초과하면, 해당 튜플은 오래되어 XID 래핑 위험이 있으므로 FREEZE 대상이 됩니다.
+   - 테이블에도 Xid가 있는데, Table은 Freeze 대상이 아니지만, table의 age는 이 테이블에 속한 tuple의 age중 가장 높은값으로 설정되기 때문에 age를 대표하는 특성이 있어서, table의 age만 보고도 이 테이블에 freezing이 필요한 tuple이 있구나 라고 판단함. 
+
+3. 튜플의 `xmin`이 현재 데이터베이스의 기준 XID(datfrozenxid)보다 오래되었는지,
+   즉, `age(xmin)`이 임계치보다 큰지 판단하여 대상을 식별하고 
+
+   * 과거 ver 9.4 이전에는 튜플의 xmin을 일반적으로 2로 변경하고 
+   * 이후에는 튜플의 내부 상태 비트마스크 t_infomask 가상 컬럼의 10번째 비트가 1로 변경되어 튜플의 내용이 변경되지 않는 한 항상 Visible영역에 둬서 볼 수 있게 된다. 
+
+
+
+Frozen 상태의 튜플이 수정되면 새로운 버전의 행이 생성된다.
+
+이는 즉 비트마스크 10번째 플래그는 다시 0이 된단거고, xmin도 최신 xid를 가지게 되므로 가시성을 확보할 수 있다.
+
+업데이트 후 생성된 새 튜플은 아직 frozen 처리가 되어 있지 않으므로, 이후 VACUUM FREEZE 작업을 통해 다시 frozen 처리될 수 있다.
+
+## 6 Vaccum And Autovaccum
+
+* 우아한 형제들 페이지도 참고 : https://techblog.woowahan.com/9478/
+
+### 6.1 Vaccum
+
+PG MVCC 단점은 동일 튜플에 대한 여러 버전이 저장되어 저장 공간이 낭비된다는점이다.
+
+Vaccum은 진공청소기 라는 뜻으로 오래된 데드 튜플을 정리하고 힙 페이지의(힙은 테이블) 공간 활용을 높여주는 작업.
+
+정리된 페이지 정보는 VM, FSM(프리스페이스맵)에 등록되어 튜플의 가시성을 보장하고 여유 공간을 확보함.
+
+동시에 쿼리 플래너가 쿼리 수행시 필요한 테이블 통계정보를 업데이트함
+
+또한, MVCC를 보장하기 위한 Anti-WraparoundXID를 부여하는 Frozen XID 작업도 처리함.
+
+* 튜플 Age가 21억을 초과하기 전 튜플의 XID를 freeze 하지 못하면? 
+
+Vacumm의 목적을 정리하면 다음과 같다.
+
+- ﻿﻿FSM, VM 정보 업데이트에 따른 힙페이지 공간 확보 및 튜플의 가시성 보장
+- ﻿﻿쿼리 플래너가 참조하는 테이블 통계정보 업데이트
+- ﻿﻿트랜잭션 ID의 wraparound를 방지하기 위한 Frozen XID 적용
+
+Vacuum 수행시 오래된 힙 튜플과 관련 인덱스 항목을 제거한다.
+
+* Vacuum명령어를 수행하면 오래된 버전의 데드 튜플들은 정리되고 빈 공간은 FSM에 등록된다. 이렇 게 등록된 빈 공간은 신규 튜플이 추가될 때 재사용되어 테이블의 전체 크기에는 변화가 없다.
+
+작업동안 테이블 읽기 쓰기는 가능하지만 create, alter 명령어는 함께 수행될 수 없다.
+
+그러나 Vaccum Full의 경우 데드 튜플을 제거함과 동시에 공간을 삭제하기 때문에, **독점 모드 락** 을 획득해서 조회 및 변경 작업을 수행하는 다른 프로세스들은 락을 모두 대기한다
+
+- ﻿﻿VACUUM - ShareUpdateExclusiveLock 획득 
+- ﻿﻿VACUUM FULL - AccessExclusiveLock 획득 
+
+ver 9.6 이전에는 테이블의 모든 페이지를 스캔하게 되어 테이블이 클수록 오래걸렸지만
+
+이후에는 VM 정보 비트를 참조하여 all_frozen = true(1)인 페이지들은 대상에서 제외되어 수행시간이 줄어들었다.
+
+* VM은 visible map, 두 개의 비트 값을 가진 비트맵 배열로 구성되어 있다
+  * all_visible : 페이지의 Visible 상태를 비트 정보로 표시
+
+    * 1일경우(true) : 모든 튜플이 트랜잭션에서 가시성이 보장되며 데드 튜플이 없는 상태.
+  * all_frozen : 페이지의 모든 Frozen 상태를 비트 정보로 표시 (**Frozen(동결) 상태**는 **페이지 내의 모든 행(tuple)의 트랜잭션 ID(XID)가 더 이상 변경되지 않으며, 자동으로 유지보수되는 상태**)
+    * 1일경우 (true) : all_visible = 1 인경우에만 해당하며, 페이지의 모든 튜플이 Fronzen XID가 해당된 상태	
+    * 0인경우(false) : 모든 튜플이나 일부 튜플이 Frozen XID가 적용되지 않은 상태
+  * all_frozen = 1인 페이지는 all_visible = 1인 상태이며 Vaccum 대상에서 제외
+* **[가시성 맵 (Visibility Map, VM)](###가시성-맵-visibility-map-vm)**
+
+Vaccum Full이 수행되면 내부적으로 튜플에 대한 Frozen XID 작업이 같이 수행되지만 VM의 all_frozen은 false이다.
+
+이후 vaccum이 수행되어야 vm 정보가 변경되여 all_visible, all_frozen 값이 모두 true로 보인다.
+
+### 6.1.1 Vaccum 진행 단계
+
+Vaccum 수행시 테이블의 모든 페이지를 스캔하면서 데드 튜플을 찾는것부터 시작한다.
+
+데드 튜플 발견시 인덱스부터 튜플을 참조하는 항목들을 정리하고, 그다음 테이블에서 튜플을 완전히 제거한다.
+
+크게 7단계를 거치며 수행되고, 여러 단계를 거치는 이유는 다른 프로세스가 차단되지 않도록 테이블 인덱스에 대한 동시서잉 보장되도록 하기 위함.
+
+
+
+1. Initialing
+
+초기 단계, 매우 짧게 수행되고 힙 페이지 스캔 시작할 준비 단계.
+
+Visibility Map(vm)을 참조하여 all_visible = true, all_frozen = t 페이지들은 제외하고
+
+나머지 페이지의 데드 튜플 중 horizon 경계 이전에 있고 더이상 필요하지 않은것들만 vaccum 대상으로 선정
+
+2. scanning heap
+
+힙 페이지 스캔 단계. 모든 데드 튜플의 TID를 수집. 
+
+3. vacuuming indexes
+
+인덱스를 vaccum 하는 단계, 힙 완전히 스캔하고 vaccum당 적어도 한번은 발생함.
+
+TID 배열에 등록된 튜플을 참조하는 모든 항목을 찾기 위해 테이블의 모든 인덱스를 스캔하고 인덱스 페이지에서 항목들을 제거.
+
+여기 인덱스 정리 단계에서 Free Space Map을 업데이트하고 통계를 계산.
+
+이 단계에서 힙 튜플에 대한 인덱스 참조 항목을 남기진 않지만, 아직 튜플 자체는 여전히 테이블에 있음.
+
+4. vacuuming heap
+
+힙은 vaccum하는 단계이며 힙을 스캔하는것관 다름. 모든 관련 인덱스 참조가 위에서 제거되었으므로 안전하게 데드 튜플 제거 수행.
+
+5. cleaning up indexses
+
+인덱스를 정리하는 단계. 힙이 완전히 스캔되고 인덱스 및 힙의 모든 데이터 제거 완료된 후에 발생.
+
+Vacuum은 다른 프로세스와의 동시성을 보장하기 위해 단계마다 획득하는 락 타입이 다르다.
+
+scanning heap, vacuuming indexes, vacuuming heap 단계에서는 ShareupdateExclusive 락을 획득하는 데 일반적인 Vacuum이 획득하는 락이며 테이블에 대한 조회 및 변경이 가능하다.
+
+6. truncating heap
+
+테이블 끝 부분에 비어있는 페이지를 잘라내어 운영체제에 반환하는 작업 상태.
+
+이 과정에서 테이블에 대해 독점 모드 락을 획득하기 때문에, 조회 및 변경 작업을 수행하는 모든 프로세스는 락을 대기함.
+
+락을 유지하는 시간은 페이지 수가 많을수록 증가하고, vaccum full 모드로 진행하는것과 동일한 상태.
+
+* 동시성이 높은 OLTP 환경에서는 짧은 순간의 락을 대기하는 것도 허용하지 못하는 경우가 있다. 이러 면 테이블 속성에 Vacuum_truncate 및 toast.Vacuum_truncate 스토리지 파라미터를 False로 적 용하여 truncating heap을 모두 비활성화하여 AccessExclusive 락이 발생하지 않도록 할 수 있다.
+
+7. performing final clean up
+
+마무리 단계로, free space map 파일을 정리하고, pg_class에 통계 정보를 등록하기 위해 통게 수집기로 정보를 보냄. Vacuum 수행 결과 생성되는 통계정보에는 컬럼 통계는 수집되지 않는다. pg_stats에 저장되는 컬 럼의 통계정보는 analyze 명령어를 통해서만 수집되며 컬럼을 포함한 테이블의 전체 통계정보가 생 성된다.
+
+**Vaccum 모니터링 방법** 
+
+pg_stat_progress_vaccum 뷰를 조회하면 된다.
+
+아래는 요청하신 내용을 표로 정리한 것입니다.
+
+| **지표명**            | **의미**                                                     |
+| --------------------- | ------------------------------------------------------------ |
+| `pid`                 | backend process ID                                           |
+| `datid`               | backend가 연결된 데이터베이스 ID                             |
+| `datname`             | backend가 연결된 데이터베이스 이름                           |
+| `relid`               | Vacuum 중인 테이블의 OID                                     |
+| `phase`               | Vacuum 현재 진행 상태                                        |
+| `heap_blks_total`     | 테이블의 총 힙 블록 수를 의미하며, scanning heap이 시작될 때 보고됨. |
+| `heap_blks_scanned`   | 스캔된 힙 블록 수를 의미. VM 비트는 스캔을 최적화하는데 사용되므로 일부 페이지는 검사 없이 건너뛰며, Vacuum이 완료되면 결국 `heap_blks_total`과 같아짐. 관련 집계는 scanning heap 단계에서만 진행됨. |
+| `heap_blks_vacuumed`  | Vacuum 된 힙 블록의 수. 테이블에 인덱스가 있으면 Vacuuming heap 단계에서만 집계됨. 데드 튜플이 없는 블록은 건너뛰므로 많은 페이지를 스킵하게 됨. |
+| `index_vacuum_count`  | 완료된 인덱스 Vacuum 주기 수.                                |
+| `max_dead_tuples`     | `maintenance_work_mem`을 기준으로 인덱스 Vacuum 주기를 수행하기 전에 저장할 수 있는 데드 튜플의 수. |
+| `num_dead_tuples`     | 마지막 인덱스 Vacuum 주기 이후 수집된 데드 튜플 수.          |
+| `heap_tuples_scanned` | 스캔된 힙 튜플 수. 단계가 `seq 스캐닝 힙`, `인덱스 스캐닝 힙`, 또는 `새 힘 쓰기`일 때만 진행됨. |
+| `heap_tuples_written` | 기록된 힙 튜플 수. 단계가 `seq 스캐닝 힙`, `인덱스 스캐닝 힙`, 또는 `새 힙 쓰기`일 때만 진행됨. |
+| `index_rebuild_count` | 재구축된 인덱스 수. 인덱스를 재구축하는 경우에만 진행됨.     |
+
+### 6.1.2 Frozen XID 제어
+
+vaccum 수행시 모든 튜플을 대상으로 frozen xid를 적용하는것은 무리이머, 얼마나 오래된 튜플을 frozen 할것인지 결정해야 함. 
+
+기준이 되는 파라미터 목록
+
+- ﻿﻿vacuum_freeze_min_age
+- ﻿﻿vacuum_freeze_table_age
+
+테이블 age가 위 파라미터보다 큰 경우 frozen 대상.
+
+#### vaccum_freeze_min_age 파라미터
+
+모든 튜플을 frozen은 비효율적. 얼마나 오래된것인지 구분하는 기준은 이 파라미터로 결정
+
+```sql
+select name, setting, short_desc
+from pg_settings where name = 'vaccum_freeze_min_age';
+
+vacuum_freeze_min_age, 50000000, ...
+```
+
+테이블 age가 설정값 이상이 되면 frozen 대상.
+
+만약 setting 값이 10만이고, age가 15만인 테이블에 vaccum 수행시 튜플 중 age가 10만 이상이 되는것들은 모두 frozen 됌.
+
+값은 10억까지 설정 가능. 그러나 너무 클 경우 선정 주기가 짧아져서 기본값은 5천만.
+
+![image-20250304160721255](./images//image-20250304160721255.png)
+
+#### vaccum_freeze_table_age 파라미터
+
+VM 비트값이 all_visible = t로 표시되는 페이지는 frozen 대상에서 제외되지만, 그대로 둔다면 언젠가는 한계에 도달.
+
+이를 위해 vaccum_freeze_table_age 파라미터를 둠.
+
+테이블 age가 vaccum_freeze_table_age 값보다 크면 vm 비트 값이 all_visible=t라도 all_frozen=f인 페이지 안의 오래된 튜플들은 강제로 frozen 함
+
+```sql
+select name,setting,short_desc
+from pg_settings
+where name like '%vacuum_freeze_table_age%'
+
+vacuum_freeze_table_age,150000000,Age at which VACUUM should scan whole table to freeze tuples.
+```
+
+트랜잭션 수가 vacuum_freeze_table_age - vacuum_freeze_min_age 제한에 도달한 테이블은 테이블 전체 페이지를 스캔하여 공격적 frozen xid를 적용한다는 의미 
+
+기본값은 1억 5천만. 
+
+* 기본값 사용시 마지막 vaccum 이후 1억 개 트랜잭션이 발생할때마다 공격적 vaccum이 수행된단 의미. 
+* 이 값이 너무크면 매번 전체 페이지를 과도하게 frozen하게되어 부담됌.
+
+공격적인 Vacuum을 수행하여 전체 테이블을 스캔하게 되면 테이블 Age와 테이블의 relfrozenxid 값 은 아래와 같이 재설정된다.
+
+* 테이블 Age = vacuum_freeze_min_age
+
+* 테이블의 relfrozenxid = Vacuum 시점의 XID - vacuum_freeze_min_age
+
+테이블 Age가 재설정 되어야 이후 트랜잭선에 따른 frozen 시점을 계수 가능.
+
+* 튜플의 xmin, age는 변화 없고 t_infomask 가상 컬럼의 10번째 비트가 1로 변경되어 frozen 표시
+
+
+
+#### vacuum freeze 수동 강제
+
+이 경우 vaccum_freeze_min_age 값을 0으로 판단하여 vm 비트열이 all_frozen = f인 페이지의 모든 튜플에 대해 적용.
+
+![image-20250304161350624](./images//image-20250304161350624.png)
+
+### 6.2 Auto Vaccum
+
+특정 임계에 따라 자동 수행되는 vaccum
+
+시스템 파라미터인 autovaccum 값이 on 이여야 함. - 기본 값
+
+임계값 기준은 테이블의 전체 튜플 수 대비 변경되거나 추가된 튜플 수. = 생성 비율
+
+현재 튜플 수인 pg_class.reltuples 값을 기준으로 임곗값을 구하고, 
+
+데드 튜플 수인 pg_stat_all_tables.n_dead_tup가 임곗값 초과시 수행됨
+
+```
+n_dead_tup > autovacuum_vacuum_scale_factor x 튜플 수(pg_class.reltuples)
++ autovacuum_vacuum_threshold (default: 50)
+```
+
+데드 튜플이 없는 테이블의 경우도 frozen이 필요하므로
+
+ver13 이후부터 마지막 vaccum 이후 신규로 추가된 튜플 수인 pg_stat_all_tables.n_ins_since_vaccum 값이 임곗값을 초과할 경우에도 autovaccum이 수행됌
+
+| **파라미터**                            | **Default** | **설명**                                                     |
+| --------------------------------------- | ----------- | ------------------------------------------------------------ |
+| `autovacuum_analyze_scale_factor`       | `0.1`       | 테이블 전체 건수 대비 10% 이상 `INSERT`, `UPDATE`, `DELETE`가 발생할 경우 통계정보 생성, 테이블 레벨에서 변경 가능. |
+| `autovacuum_analyze_threshold`          | `50`        | 튜플이 50건 이상 `INSERT`, `UPDATE`, `DELETE`가 발생할 경우 통계정보 생성, 테이블 레벨에서 변경 가능. |
+| `autovacuum_vacuum_scale_factor`        | `0.2`       | 전체 테이블 크기의 20% 이상이 데드 튜플로 차지될 경우 Vacuum 수행, 테이블 레벨에서 변경 가능. |
+| `autovacuum_vacuum_threshold`           | `50`        | 튜플이 50건 이상 데드 튜플이 발생할 경우 Vacuum 수행, 테이블 레벨에서 변경 가능. |
+| `autovacuum_vacuum_insert_scale_factor` | `0.2`       | `reltuples`의 일부로 마지막 Vacuum 이후의 튜플 `INSERT` 수가 전체 테이블 크기의 20% 이상일 경우 Vacuum 수행 (`PostgreSQL 13` 이상). |
+| `autovacuum_vacuum_insert_threshold`    | `1000`      | Vacuum이 자동 수행되기 위한 최소 `INSERT` 건수 (`PostgreSQL 13` 이상). |
+
+```sql
+
+SELECT name, setting, unit, short_desc
+FROM pg_settings
+WHERE name IN (
+    'autovacuum_analyze_scale_factor',
+    'autovacuum_analyze_threshold',
+    'autovacuum_vacuum_scale_factor',
+    'autovacuum_vacuum_threshold',
+    'autovacuum_vacuum_insert_scale_factor',
+    'autovacuum_vacuum_insert_threshold'
+);
+```
+
+기본적으로 autovacuum_vacuum_threshold의 값은 50 rows 이고 
+
+autovacuum_vacuum_scale_factor는 20%
+
+table의 Dead Tuple 누적치가 테이블의 모든 행 중 20% + 50개를 초과하는 경우 AutoVacuum 이 호출되어 Dead Tuple을 정리
+
+
+
+autovaccum 임곗값을 시스템 파라미터로만 모든 테이블에 동일한 기준으로 적용한다면, 데이터 변경이 빈번한 테이블의 경우 그만큼 autovaccum이 자주 수행될수박에없음.
+
+만약 테이블이 크다면, 대량 페이지 스캔 과정이 발생하고 성능에 부담을 줄 수있음
+
+대용량 테이블의 경우, 시스템 파라미터 보다는 테이블 레벨에서 적정한 값을 정의해 주는것이 좋음.
+
+대용량 테이블의 경우 scale_factor를 0으로 하고 threadshold만을 적정한 값으로 지정
+
+* scale_factor는 비율인데, 1억건의 경우 0.2라면 2천만건 이상 데드 튜플이 발생해야 실행되고 간헐적으로 대량으로 처리되므로 엄청난 부하.
+
+```sql
+-- 테이블마다 설정 예시
+ALTER TABLE your_table_name
+SET (autovacuum_enabled = true, -- 자동 Vacuum 활성화
+     autovacuum_vacuum_scale_factor = 0.05, -- 5% 이상 데드 튜플이 생기면 Vacuum 수행
+     autovacuum_vacuum_threshold = 100, -- 100개 이상 데드 튜플이 생기면 Vacuum 수행
+     autovacuum_analyze_scale_factor = 0.02, -- 2% 이상 데이터 변경 시 Analyze 실행
+     autovacuum_analyze_threshold = 50); -- 50개 이상 변경 시 Analyze 실행
+
+
+-- 대용량 테이블 설정
+alter table t1 set(autovaccum_vaccum_scale_factor =0 ,
+                  autovaccum_vaccum_threshold = 100,000
+                  )
+10만건 데드 튜플 발생시마다 autovaccum 수행. 
+```
+
+* **테이블별 설정이 있으면, 해당 테이블에 대해서는 글로벌 설정이 무시되고 테이블별 설정이 적용됩니다.**
+  반면, **테이블별 설정이 없으면 전역 설정을 따르게 됩니다.**
+
+#### 6.2.2 autovaccum_feeze_max_age
+
+운영 관리자가 매번 관리하는 경우가 아니라면, XID 수명이 오래된 테이블들은 강제로 vaccum 수행해야 함.
+
+데이터 변경이 전혀 없는 테이블도 마찬가지.
+
+이 경우 autovaccum_freeze_max_age 파라미터 적용 가능
+
+> 해당 값을 초과하는 age의 테이블에 대해 Anti Wraparound AutoVacuum을 수행함, AutoVacuum을 off해도 강제로 수행됨
+
+* `autovacuum_freeze_max_age`는 PostgreSQL에서 **트랜잭션 ID(XID) wraparound(오버플로우) 방지를 위해 `VACUUM FREEZE`를 언제 실행할지를 결정하는 설정값**
+
+```sql
+select name, setting,short_desc
+where pg_settings where name = 'autovaccum_freeze_max_age'
+```
+
+* 기본값은 2억. 
+
+마지막 vaccum 이후 테이블 트랜잭션이 autovaccum_freeze_max_age - vaccum_freeze_min_age 차이 만큼
+
+발생하면 강제로 autovaccum 실행.
+
+* 만약 이전에 한번도 vacuum이 안됐다면, 테이블 age가 autovaccum_freeze_max_age 보다 커지는 시점에 수행된다는 의미
+  * 조회만 하더라도 age는 계속 1씩 올라감.
+
+강제 실행시 테이블 age와 relfrozenxid는 재설정 됌.
+
+아래 파라미터는 autovaccum이 수행될때만 기준으로 적용되며, 수동 vaccum의 경우 시스템 레벨 파라미터 기준임.
+
+- ﻿﻿autovacuum_freeze_min_age
+- ﻿﻿autovacuum_freeze_table_age
+- ﻿﻿autovacuum_freeze_max_age
+
+테이블 레벨에서 적용한 autovacuum_freeze_max_age 값이 시스템 레벨의 값보다 클 경우 에러가 발생
+
+반드시 테이블 레벨에 정의된 값은 시스템 레벨에 정의된 값보다는 작거나 같아야 하며 
+
+테 이블 레벨에서 정의한 값이 우선순위를 갖는다.
+
+
+
+#### autovaccum 결과 로그
+
+log_autovaccum_min_duration = 0으로 설정해야 함 기본값은 -1
+
+로그파일에 있음.
+
+#### 6.2.3 autovaccum 최적화
+
+autovaccum 작업 최적화는, 단순하게 정기적으로 vaccum을 일시 중지 시키는것.
+
+vaccum_cost_limit에 정의된 단위만큼 작업을 진행하고, vaccum_cost_deplay 시간 간격 동안 쉬게 한다.
+
+작업 단위인 누적 비용 임곗값인 autovacuum_vacuum_cost_limit을 정의하는 공식은 다음과 같다.
+
+```
+autovacuum_vacuum_cost_limit = vacuum_cost_page_dirty + vacuum_cost_page_hit
++ vacuum_cost_page_miss
+```
+
+![image-20250304164109786](./images//image-20250304164109786.png)
+
+여러 개의 Vacuum worker가 존재하는 사용량이 많은 서버의 경우 vacuum_cost_limit의 기본값인
+
+200은 일반적으로 너무 낮다고 볼 수 있으므로 worker 개수를 곱한 값 이상으로 설정하는 것이 좋다.
+
+비용 기반 autovacuum 최적화 절차는 다음과 같다.
+
+- ﻿﻿autovacuum_vacuum_cost_limit이 1일 경우, vacuum_cost_limit 값인 200을 참조한다.
+- ﻿﻿autovacuum 작업 단위 비용은 200의 비용이 필요하다.
+- ﻿﻿page_hit 영역에 있는 페이지를 처리할 때마다 1의 비용을 소비한다.
+- ﻿﻿page_miss 영역으로 페이지를 처리할 때마다 디스크 10가 발생하면 2의 비용을 소비한다.
+- ﻿﻿page_dirty 영역에 있는 페이지를 처리할 때마다 20의 비용을 소비한다.
+- ﻿﻿이러한 비용을 전부 합쳐 200에 도달하면 2ms동안 autovacuum 프로세스는 휴면 상태로 들 어 간다.
+
+대체로 autovacuum_vacuum_cost_limit 값을 1000~2000으로 설정하여 휴면 시간을 최대한 줄여
+
+Vacuum 성능을 5배~10배 개선할 수 있다.
+
+* 주어진 200의 credit 이 모두 소진되면 해당 AutoVacuum 프로세스는 종료됩니다. 
+  그렇기 때문에 이 값이 너무 작으면 AutoVacuum이 Dead Tuple을 충분히 다 정리하지 못한 채 끝나버려서
+  Dead Tuple이 계속 누적되는 경우가 생길 수 있습니다.
+
+ 또한, vacuum_cost_page_miss 값은 대 0으로 설정하는 것을 권장하고 있다.
 

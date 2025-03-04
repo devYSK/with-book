@@ -1,0 +1,338 @@
+[ 3장. 락(LOCK) ]
+
+
+1. 객체 레벨 락(Object level lock)
+
+• 테이블 5000개 create, drop 함수 생성
+ CREATE OR REPLACE FUNCTION fn_cretab() RETURNS void
+ AS $$
+ DECLARE
+ rec record;
+ 
+ BEGIN
+	 FOR rec IN select id from generate_series(1, 5000) AS id LOOP
+		EXECUTE 'CREATE TABLE c' || rec.id || '(id int)' ;
+		EXECUTE 'DROP TABLE c' || rec.id ||' ' ; 
+	END LOOP;
+ END;
+ $$ LANGUAGE plpgsql volatile;
+
+• 단일 트랜잭션에서 테이블 5000개 create, drop 실행
+ begin;
+ select fn_cretab();
+
+• 파티션 100개인 List 파티션 테이블 생성
+ CREATE OR REPLACE FUNCTION fn_crepart() RETURNS void
+ AS $$
+ DECLARE
+  rec record ;
+ 
+  BEGIN
+   CREATE TABLE t_part(id int) PARTITION BY LIST(id);
+   FOR rec IN select id from generate_series(1, 100) AS id LOOP
+     EXECUTE 'CREATE TABLE t_part_' || rec.id || ' partition of t_part for values in('|| rec.id || ')' ;
+   END LOOP;
+ END;
+ $$ LANGUAGE plpgsql volatile;
+ select fn_crepart();
+
+• 파티션 테이블 조회
+ Begin;
+ Select count(*) from t_part ; 
+ 
+• 파티션 테이블 lock 조회 
+ select count(*) 
+ from( select(select relname from pg_class c where c.oid = l.relation ) as relname, mode
+       from pg_locks l   
+	   where mode = 'AccessShareLock'
+     ) a
+ where a.relname like 't_part%' ;
+  
+• 락 모드에 따른 호환 여부를 관찰하기
+ drop table t ;
+ create table t(id integer, name char(3), point integer);
+ insert into t values(1, 'aaa', 1000),(2,'bbb',2000),(3,'ccc',3000) ;
+ 
+• T1 트랜잭션 
+ SELECT pg_backend_pid();
+ 
+ begin;
+ update t set point=3000 where id = 2;
+
+• T2 트랜잭션 
+ SELECT pg_backend_pid();
+
+ begin;
+ create index t_idx1 on t(id) ; 
+
+• pg_locks 조회  
+ select locktype, 
+        relation,
+        relation::regclass as relname, 
+		virtualxid, 
+		transactionid,
+		pid,
+		mode,
+		granted
+ from pg_locks pl
+ where pid <> pg_backend_pid() 
+ order by pid ;
+
+• 락 홀더 프로세스 조회 
+ select pid, pg_blocking_pids(pid) lock_holder, backend_xid, backend_xmin, xact_start, xact_start, state, wait_event , query
+ from pg_stat_activity
+ where pid = 1667220 ;
+
+• 락 대기 프로세스 조회 
+ select pid, pg_blocking_pids(pid) lock_holder, backend_xid, backend_xmin, xact_start, xact_start, state, wait_event , query
+ from pg_stat_activity
+ where pid = 1674928 ;
+ 
+ 
+ 
+2. 행 레벨 락(Row level lock)
+ 
+ 2.1 행 레벨 락 모드 
+
+• 튜플 락 모드 조회 함수 생성
+ CREATE or REPLACE FUNCTION fn_lockmod(relname text, pageno integer)
+ RETURNS TABLE(ctid tid, xmax text, lock_only text, is_multi text, keys_upd text, keyshr_lock text, shr_lock text)
+ AS $$
+ SELECT(pageno,lp)::text::tid AS ctid,
+       t_xmax as xmax,
+       CASE WHEN(t_infomask & 128) > 0   THEN 't' END AS lock_only,
+       CASE WHEN(t_infomask & 4096) > 0  THEN 't' END AS is_multi,
+       CASE WHEN(t_infomask2 & 8192) > 0 THEN 't' END AS keys_upd,
+       CASE WHEN(t_infomask & 16) > 0 THEN 't' END AS keyshr_lock,
+       CASE WHEN(t_infomask & 16+64) = 16+64 THEN 't' END AS shr_lock
+ FROM heap_page_items(get_raw_page(relname,pageno))
+ ORDER BY lp ;
+ $$ LANGUAGE sql;
+
+• Exclusive 모드 행 레벨 락
+ drop table t ;
+ create table t( id integer primary key, name char(3), point integer);
+ insert into t values(1, 'aaa', 1000),(2,'bbb',2000),(3,'ccc',3000) ;
+ begin;
+ select * from t where id = 1 for no key update;
+ select * from t where id = 2 for update; 
+ select txid_current();
+
+• 튜플 상태 확인 
+ select * from heap_pageinfo ('t',0,0);
+
+• 튜플 락 모드 조회
+ select * from fn_lockmod ('t',0);
+
+ select locktype, 
+        relation,
+		relation::regclass as relname, 
+		virtualxid, 
+		transactionid,
+		pid,
+		mode,
+		granted
+ from pg_locks pl
+ where pid <> pg_backend_pid() 
+ order by pid ;
+
+• Share 모드 행 레벨 락 
+ begin;
+ select * from t where id = 1 for share ;
+ select * from t where id = 2 for key share ;
+ select txid_current();
+
+ • 튜플 상태 확인
+ select * from heap_pageinfo('t',0,0);
+
+ • 튜플 락 모드 조회
+ select * from fn_lockmod('t',0);
+
+• pg_locks 조회
+ select locktype, 
+        relation,
+		relation::regclass as relname, 
+		virtualxid, 
+		transactionid,
+		pid,
+		mode,
+		granted
+ from pg_locks pl
+ where pid <> pg_backend_pid() 
+ order by pid ;
+
+
+
+2.2 다중 트랜잭션(Multitransactions)
+
+• Multitransaction 락 
+ begin;
+ update t set point = point + 100 where id = 2;
+ select txid_current();
+
+• 튜플 상태 확인
+ select * from heap_pageinfo('t',0,0);
+
+• 튜플 락 모드 조회
+ select * from fn_lockmod('t',0);
+
+• 튜플 락 모드 조회
+ select xmin,xmax,a.* from t a;
+
+• pg_locks 조회
+ select  locktype, 
+		relation,
+		relation::regclass as relname, 
+		virtualxid, 
+		transactionid,
+		pid,
+		mode,
+		granted
+ from pg_locks pl
+ where pid <> pg_backend_pid() 
+ order by pid ;
+
+• 다중 트랜잭션 상태 확인하기
+ CREATE EXTENSION pgrowlocks ;
+ SELECT * FROM pgrowlocks('t') ;
+ 
+ 
+ 
+2.3 튜플 락 대기 
+
+• pg_locks 뷰 조회하기
+ drop table t ;
+ create table t( id integer primary key, name char(3), point integer);
+ insert into t values(1, 'aaa', 1000),(2,'bbb',2000),(3,'ccc',3000) ;
+ 
+• lock 모니터링 view 생성
+ create view v_lock as
+ select  locktype,
+		 CASE locktype
+		 WHEN 'relation' THEN relation::regclass::text
+		 WHEN 'transactionid' THEN transactionid::text
+		 END AS name,
+		 relation,
+		 WHEN 'tuple' THEN relation::regclass::text||':'||tuple::text
+		 transactionid,
+		 pid,
+		 mode,
+		 granted
+ from pg_locks pl
+ where pid <> pg_backend_pid()
+ and locktype <> 'virtualxid'
+ order by pid, locktype ;
+ 
+• T1 트랜잭션 
+ begin;
+ select txid_current(), pg_backend_pid();
+ update t set point= point+100 where id = 1;
+ 
+• T2 트랜잭션 
+ begin;
+  select txid_current(), pg_backend_pid();
+  update t set point= point+100 where id = 1;
+ 
+• pg_locks 조회 
+ select * from v_lock ;
+ 
+• T3 트랜잭션 
+ begin;
+  select txid_current(), pg_backend_pid();
+  update t set point= point+100 where id = 1;
+  
+• pg_locks 조회
+ select * from v_lock;
+
+• T4 트랜잭션 
+ begin;
+  select txid_current(), pg_backend_pid();
+  update t set point= point+100 where id = 1;
+ 
+• pg_locks 조회
+ select * from v_lock;
+
+• 락 프로세스 조회 
+ select pid, pg_blocking_pids(pid) lock_holder, backend_xid, backend_xmin, state, wait_event
+ from pg_stat_activity
+ where pid in(2253254, 2256487, 2407232, 2414213) ;
+
+• T1 트랜잭션 
+ rollback ;
+
+• pg_locks 조회
+ select * from v_lock;
+
+• 락 프로세스 조회 
+ select pid, pg_blocking_pids(pid) lock_holder, backend_xid, backend_xmin, state, wait_event
+ from pg_stat_activity
+ where pid in(2253254, 2256487, 2407232, 2414213) ;
+ 
+• lock timeout 처리 
+ set lock_timeout = 10000 ;
+
+ begin;
+  update t set point= point+100 where id = 1;
+
+• Nowait lock 처리 
+ begin;
+  Select * from t where id = 1 for update nowait ;  
+
+• SKIP LOCKED 처리  
+ begin;
+  Select * from t for update skip locked;
+
+
+
+2.4 Dead Lock 
+
+# Dead Lock 예제
+
+• T1 트랜잭션 
+ begin;
+  select txid_current(), pg_backend_pid();
+  update t set point=5000 where id = 1;
+
+• T2 트랜잭션 
+ begin;
+  select txid_current(), pg_backend_pid();
+  update t set point=10000 where id = 2;
+
+• T1 트랜잭션 
+ update t set point=6000 where id = 2;
+
+• T2 트랜잭션 
+ update t set point=20000 where id = 1;
+
+• T1 트랜잭션 
+ UPDATE 1
+  postgres=*# select * from t;
+
+
+
+3. 메모리 레벨 락(Memory level Lock)
+
+# 메모리 레벨 락 예제
+
+• T1 트랜잭션
+ select pg_backend_pid( );
+
+ begin;
+ declare cur cursor for select * from t;
+ fetch cur;
+
+• T2 트랜잭션
+ select pg_backend_pid();
+
+• 프로세스 조회 
+ SELECT pid, backend_type, state, wait_event_type, wait_event, pg_blocking_pids(pid) holder_pid
+ FROM pg_stat_activity
+ where pid in(2685105, 2782183);
+
+• T1 트랜잭션
+ close cur;
+ CLOSE CURSOR
+ end; 
+
+• T2 트랜잭션
+ vacuum freeze verbose t;

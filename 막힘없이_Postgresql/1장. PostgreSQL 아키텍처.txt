@@ -1,0 +1,295 @@
+[ 1장. PostgreSQL 아키텍처 ]
+
+
+1. 주요 프로세스  
+
+• Template0을 복제해서 exemdb를 생성 
+ create database exemdb template template0;
+
+• 데이터베이스 조회하기
+ select OID, datname, datistemplate, datallowconn from pg_database;
+
+• 스키마 조회하기
+ select * from pg_catalog.pg_namespace;  
+
+• 테이블스페이스 조회
+ select * from pg_tablespace;
+
+• 테이블스페이스 생성 및 조회
+ CREATE TABLESPACE exem_tbs LOCATION '/postgres/SSD/Data';
+ select * from pg_tablespace;
+
+• 설치 가능한 익스텐션 목록 확인하기
+ SELECT * FROM pg_available_extensions;
+
+• 신규 익스텐션 설치하기
+ CREATE EXTENSION extension_name;
+
+• 기존 익스텐션 삭제하기 
+ DROP EXTENSION extension_name;
+
+• 설치된 익스텐션 확인하기
+ SELECT * FROM pg_extension; 
+
+
+
+3.2 물리 구조(Physical Structure)  
+ 3.2.1 디렉토리 구조  
+  3.2.2 포크(Fork)
+
+• 테이블을 생성한 후 파일 경로 
+ select pg_relation_filepath('t1');
+ 
+• 테이블 생성 
+ CREATE TABLE tab_OID(id integer);
+
+• 테이블 OID 조회
+ select OID, relname from pg_class where relname = 'tab_OID' 
+
+• 테이블이 생성된 파일 위치
+ select pg_relation_filepath('tab_OID')
+ 
+• 테이블 생성 
+ drop table tab_OID;
+ CREATE TABLE tab_OID(id integer);
+  
+• 최소 테이블 생성 후 OID와 relfilenode 컬럼값 조회
+ select 'tab_OID'::regclass::OID;
+ select OID, relname, relfilenode from pg_class where relname = 'tab_OID';
+ 
+• 테이블에 파일명 조회 
+ select pg_relation_filepath('tab_OID');
+  
+• Vacuum 수행
+ vacuum full tab_OID;
+
+• Vacuum full 수행 후 OID와 relfilenode 컬럼값 조회
+ select 'tab_OID'::regclass::OID;
+ select OID, relname, relfilenode from pg_class where relname = 'tab_OID' ;
+
+• 테이블에 파일명 조회
+ select pg_relation_filepath('tab_OID');
+ 
+• t1 테이블에 튜플 20건을 입력FSM을 조회하면 페이지 모두 빈 공간 없이 튜플로 채움
+ drop table t1; 
+ create table t1(id integer, name char(2000));
+ alter table t1 set(autovacuum_enabled=false);
+ insert into t1 select i as id , 'aaa' as name from generate_series(1,20) a(i) ;
+ select * from pg_freespace('t1');
+ 
+• 업데이트를 수행해 데드 튜플로 인해 페이지 개수가 2배로 증가 
+ update t1 set name='bbb';
+ select * from pg_freespace('t1');
+ 
+• Vacuum 수행 후 데드 튜플이 삭제 됨
+ vacuum t1;
+
+• 페이지의 VM 비트 정보 변경 
+ drop table t1;
+ create table t1(id integer, name char(2000));
+ insert into t1 select i as id , 'aaa' as name from generate_series(1,10) a(i);
+
+• 빈 페이지에 처음 데이터를 입력하면 all_visible=f, all_frozen=f이 된다.
+ select blkno, all_visible, all_frozen from pg_visibility('t1');
+
+• all_visible=t가 되도록 하기 위해 Vacuum 수행
+ Vacuum t1;
+ select blkno, all_visible, all_frozen from pg_visibility('t1');
+
+•  튜플을 업데이트 하면 all_visible=f 인 페이지 발생 
+ update t1 set name='ccc' where id = 1;
+ select blkno, all_visible, all_frozen from pg_visibility('t1');
+
+• 다시 Vacuum을 수행하면 모든 데드 튜플이 제거되고 페이지 안의 튜플들은 Visible 상태로 변경.
+ vacuum t1;
+ select blkno, all_visible, all_frozen from pg_visibility('t1');
+
+• vacuum freeze를 수행하면 모든 페이지의 VM 비트열이 all_visible=t, all_frozen=t가 됨.
+ Vacuum freeze t1;
+ postgres=#  select blkno, all_visible, all_frozen from pg_visibility('t1');
+
+
+
+4. Shared Buffer
+ 4.1 Shared Buffer 구성 요소
+  4.3.1 Clock Sweep 알고리즘  
+
+ # 대량 읽기 수행 시 링 버퍼 사용하기
+
+• 테이블 생성
+ CREATE TABLE R_T(
+  id integer PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+  s char(1000)
+ ) WITH(fillfactor = 10);
+ 
+• 데이터 입력
+ INSERT INTO R_T(s) SELECT 'rto' FROM generate_series(1,4097);
+ 
+• 테이블 통계정보 생성
+ ANALYZE R_T;
+ 
+• Shared Buffer 크기와 테이블 크기 확인하기
+ show Shared _Buffers ; 
+ select pg_size_pretty(pg_total_relation_size('R_T'));
+
+• 테이블 정보 확인
+ SELECT relname, relfilenode, relpages
+ FROM pg_class
+ WHERE relname IN('r_t', 'r_t_pkey');
+
+• Shared Buffer 초기화를 위해 데이터베이스 재시작
+ pg_ctl restart
+
+• 테이블 전체 스캔
+ EXPLAIN(analyze, costs off, timing off, summary off)
+ SELECT id FROM r_t;
+
+• 링 버퍼 사용 확인 
+ SELECT count(*) 
+ FROM pg_Buffercache 
+ WHERE relfilenode = pg_relation_filenode('r_t'::regclass); 
+
+• 인덱스 스캔 수행 후 버퍼 수 확인
+ EXPLAIN(analyze, costs off, timing off, summary off) 
+ SELECT * FROM r_t ORDER BY id;
+
+• 인덱스 스캔 후 버퍼 수 확인
+ SELECT relfilenode, count(*)
+ FROM pg_Buffercache
+ WHERE relfilenode IN(
+ pg_relation_filenode('r_t'),
+ pg_relation_filenode('r_t_pkey')
+ )
+ GROUP BY relfilenode
+
+• 대량 쓰기를 위해 파일 생성하기
+ copy  r_t to '/home/postgres/r_t.csv' with csv;
+
+• 버퍼에 있는 페이지 수 확인하기
+ SELECT count(*) 
+ FROM pg_Buffercache 
+ WHERE relfilenode = pg_relation_filenode('r_t'::regclass); 
+ 
+• copy from 명령어로 테이블 쓰기 
+ copy r_t from '/home/postgres/r_t.csv';
+ 
+• 버퍼에 존재하는 페이지 수 조회하기
+ SELECT count(*) 
+ FROM pg_Buffercache 
+ WHERE relfilenode = pg_relation_filenode('r_t'::regclass); 
+
+• 버퍼에 존재하는 테이블에 모든 페이지 조회하기
+ SELECT relforknumber,count(1)
+ FROM pg_Buffercache 
+ group by relforknumber
+ WHERE relfilenode = pg_relation_filenode('r_t'::regclass) 
+ 
+
+  #Vacuuming 시 링 버퍼 사용하기
+
+• 테이블 조회하기
+ SELECT count(*) 
+ FROM pg_Buffercache 
+ WHERE relfilenode = pg_relation_filenode('r_t'::regclass); 
+
+• Vacuum 수행하기
+ vacuum r_t ;
+ VACUUM;
+ 
+• 버퍼에 존재하는 페이지 수 조회하기 
+ SELECT count(*) 
+ FROM pg_Buffercache 
+ WHERE relfilenode = pg_relation_filenode('r_t'::regclass); 
+
+• Relforknumber 컬럼을 기준으로 버퍼 개수 조회하기
+ SELECT relforknumber,count(1)
+ FROM pg_Buffercache 
+ WHERE relfilenode = pg_relation_filenode('r_t'::regclass)
+ group by relforknumber
+  
+• pg_prewarm 수동 테스트를 위한 테이블 생성하기
+ create table tb_warm as select * from generate_series( 1, 1000000) as id ; 
+
+• tb_warm 테이블 조회하기
+ EXPLAIN(analyze, Buffers, costs off, timing off, summary off) 
+ SELECT * FROM tb_warm;
+                 
+• pg_prewarm 익스텐션 설치하기
+ create extension pg_prewarm;
+ 
+• pg_prewarm을 이용해 특정 테이블 캐싱하기
+ select pg_prewarm('public.tb_warm')
+
+• tb_warm 테이블 조회하기
+ EXPLAIN(analyze, Buffers, costs off, timing off, summary off) 
+ SELECT * FROM tb_warm;
+
+• postgresql.conf 파일 환경설정
+ Shared _preload_libraries = 'pg_prewarm'
+ pg_prewarm.autoprewarm = true
+ pg_prewarm.autoprewarm_interval = 300s
+ 
+• autoprewarm.blocks 파일 수동 변경하기
+ SELECT autoprewarm_dump_now();
+ 
+• tb_warm 테이블 캐시 확인하기
+ SELECT count(*) 
+ FROM pg_Buffercache
+ WHERE relfilenode = pg_relation_filenode('tb_warm'::regclass);
+
+• postgresql.auto.conf 파일 설정
+ Shared_preload_libraries = 'pg_prewarm'
+ pg_prewarm.autoprewarm = true
+ pg_prewarm.autoprewarm_interval = 300s
+
+• 테이블 데이터를 캐싱
+ EXPLAIN(analyze, Buffers, costs off, timing off, summary off)
+ SELECT * FROM tb_warm 
+
+• autoprewarm.blocks 파일을 수동으로 변경
+ SELECT autoprewarm_dump_now();
+  
+• 데이터베이스 재시작 후 tb_warm 캐시 여부 확인하기
+ SELECT count(*)
+ FROM pg_Buffercache
+ WHERE relfilenode = pg_relation_filenode('tb_warm'::regclass);;
+ 
+
+ 
+5. WAL(Write-Ahead Log) 
+
+• Pg_ls_waldir 조회하기
+ select * from pg_ls_waldir() order by modification desc limit 5; 
+
+• LSN 정보 조회하기
+ SELECT pg_current_wal_lsn() ,  
+       pg_current_wal_insert_lsn() ;
+
+• LSN을 이용해 WAL 파일 확인하기
+select pg_walfile_name('7/75A8AB40'),
+       pg_walfile_name_offset('7/75A8AB40');
+
+• pg_switch_wal() 함수 수행하기
+ select pg_switch_wal() ;
+
+• pg_switch_wal() 함수 수행하기 
+ select pg_switch_wal() ;
+
+• 서로 다른 두 LSN 차이 구하기
+ SELECT pg_wal_lsn_diff(pg_current_wal_lsn(), pg_last_wal_replay_lsn());
+
+
+5.2 체크포인트(Checkpoint)
+  
+• 테이블에 DML을 수행해 트랜잭션을 발생
+ update tb_warm set id = id + 1 ;
+ SELECT count(*) FROM pg_buffercache WHERE isdirty;
+  
+• Redo 포인트 위치를 확인하기
+ SELECT pg_current_wal_insert_lsn();
+ 
+• 체크포인트 수행으로 Dirty 페이지 모두 플러쉬 하기
+ SELECT count(*) FROM pg_buffercache WHERE isdirty;
+ 
+• 컨트럴파일 정보 보기
+ postgres@ ../14/main$ /usr/lib/pg/bin/pg_controldata  /var/lib/postgresql/14/main  

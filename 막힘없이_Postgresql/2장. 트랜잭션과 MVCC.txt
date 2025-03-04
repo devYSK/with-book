@@ -1,0 +1,779 @@
+[ 2장. 트랜잭션과 MVCC ]
+
+ 1. 트랜잭션 격리 수준(Transaction Isolation level) 
+ 
+  1.1 PostgreSQL에서의 격리 수준 
+  
+   2.1 페이지 구조
+ 
+• 헤더의 크기 정보를 조회하기
+ CREATE EXTENSION pageinspect;
+ SELECT lower, upper, special, pagesize FROM page_header(get_raw_page('t',0));
+ 
+ 
+ 
+2.2.1 가상 트랜잭션(Virtual transactions) 예제
+
+ begin;
+  select pg_current_xact_id_if_assigned();
+ 
+ begin;
+  update t set point=500 where id =1 ;
+  select pg_current_xact_id_if_assigned();
+  select pg_current_xact_id();
+ 
+
+ begin;
+ update t set point = 2000 where id =1 ;
+ select id, points from t;
+ select id, point from t;
+
+ set ON_ERROR_ROLLBACK on
+ begin;
+ update t set point = 2000 where id = 1;
+ select id, points from t;
+ select id, point from t;
+ commit;
+
+
+
+2.3 튜플 구조
+
+• 페이지 저장 상태를 확인하기  
+ create table t1( col1 boolean , col2 integer , col3 boolean , col4 integer ) ;
+ insert into t1 values('true',1,'false',2) ;
+ SELECT lp_len FROM heap_page_items(get_raw_page('t5', 0));
+ 
+• 테이블의 한 튜플의 크기 확인하기 
+ drop table t1;
+ create table t1( col1 integer , col2 integer , col3 boolean , col4 boolean ) ;
+ insert into t1 values(1,2,'true','false') ;
+ SELECT lp_len FROM heap_page_items(get_raw_page('t1', 0)); 
+ 
+
+ 
+2.4 튜플 버전
+
+• 테이블을 생성하고 1건을 Insert 한 후 트랜잭션 ID를 조회 
+ drop table t ;
+ create table t( id integer, name char(3), point integer);
+ create index idx_t on t(id) ;
+ 
+ begin;
+  insert into t values(1, 'aaa', 1000);
+  select * from t;
+ 
+ SELECT pg_current_xact_id();
+ 
+• 튜플의 상태 및 버전 정보를 조회하기  
+ CREATE or REPLACE FUNCTION heap_page(relname text, pageno integer)
+ RETURNS TABLE(ctid tid, state text, xmin text, xmax text)
+ AS $$
+ SELECT(pageno,lp)::text::tid AS ctid,
+	CASE lp_flags
+	WHEN 0 THEN 'unused'
+	WHEN 1 THEN 'normal'
+	WHEN 2 THEN 'redirect to '||lp_off
+	WHEN 3 THEN 'dead'
+	END AS state,
+	t_xmin || CASE
+	WHEN(t_infomask & 256) > 0 THEN 'committed'
+	WHEN(t_infomask & 512) > 0 THEN 'aborted'
+	ELSE 'active'
+	END AS xmin,
+	t_xmax || CASE
+	WHEN(t_infomask & 1024) > 0 THEN 'committed'
+	WHEN(t_infomask & 2048) > 0 THEN 'aborted'
+	ELSE 'active'
+	END AS xmax
+ FROM heap_page_items(get_raw_page(relname,pageno))
+ ORDER BY lp;
+ $$ LANGUAGE sql;
+
+ select * from heap_page('t',0);
+ select xmin, xmax , * from t;
+ 
+ 
+ 
+2.4.2 DELETE
+
+• 튜플이 삭제후 정보 조회
+ begin;
+  delete from t where id = 1;
+  select pg_current_xact_id();
+  select * from heap_page('t',0);
+ 
+• 튜플 롤백 후 튜플의 상태 조회
+ rollback ;
+ select * from heap_page('t',0);
+
+
+2.4.4 UPDATE
+
+ begin;
+  update t set point=200 where id = 1 ;
+  select pg_current_xact_id();
+  select * from heap_page('t',0);
+
+  
+2.5 인덱스와 튜플 
+ 
+• 튜플의 버전을 위해 트랜잭션 조회하기
+ SELECT itemoffset, ctid
+ FROM bt_page_items('idx_t',1) ; 
+
+
+ 
+3. 스냅샷(Snapshot)
+
+ 3.1 스냅샷이란
+  
+# 스냅샷과 트랜잭션 시점에 따른 튜플의 가시성 조회하기
+
+• T1 트랜잭션
+ begin;
+  insert into t values(1, 'aaa', 1000);
+  SELECT pg_current_xact_id();
+ 
+• T2 트랜잭션
+ begin; 
+  insert into t values(2,'bbb',2000);
+  SELECT pg_current_xact_id();
+ 
+• T3 트랜잭션
+ BEGIN ISOLATION LEVEL REPEATABLE READ;
+ SELECT pg_current_snapshot();
+ select xmin, xmax,* from t;
+ 
+• T4 트랜잭션
+ begin;
+  update t set point = 1000 where id = 2;
+  SELECT pg_current_xact_id();
+
+• T3 트랜잭션
+ select ctid, * from t;
+
+• T4 트랜잭션
+ select ctid, * from t;
+
+• T1 트랜잭션
+ SELECT * FROM heap_page('t',0);
+
+
+3.3 스냅샷과 데이터베이스 Horizon
+
+# Horizon이 Vacuum 동작에 어떠한 영향을 주는 조회하기
+
+ create table t1(col1 integer, col3 integer);
+ create table t2(col1 integer, col2 integer);
+
+• T1 트랜잭션
+ begin;
+  select pg_backend_pid(), pg_current_xact_id();
+  insert into t1 values(1,10);
+  select pid,
+       backend_xid,
+       backend_xmin,
+       state
+  from pg_stat_activity
+  where pid in(2455);
+
+• T2 트랜잭션
+ begin;
+  select pg_backend_pid(), pg_current_xact_id();
+  insert into t2 values(1,100);
+  update t2 set col2 = 100;
+
+ select pid,
+        backend_xid,
+        backend_xmin,
+        state
+ from pg_stat_activity
+ where pid in(2455, 31988) ;
+ select * from heap_page('t2',0);
+
+• T1 트랜잭션
+ commit ;
+ select pid,
+       backend_xid,
+       backend_xmin,
+       state
+ from pg_stat_activity
+ where pid in(2455, 31988);
+
+ Vacuum verbose t2;
+ select * from heap_page('t2',0);
+ 
+
+
+3.4 Exporting Snapshot
+ 
+• T1 트랜잭션
+ BEGIN ISOLATION LEVEL REPEATABLE READ;
+ select * from t1;
+ SELECT pg_export_snapshot();
+  
+• T2 트랜잭션
+ delete from t1 where col1 =1;
+ DELETE 1
+ select * from t1;
+   BEGIN ISOLATION LEVEL REPEATABLE READ;
+   SET TRANSACTION SNAPSHOT '00000009-0000012C-1';
+ 
+• T1 트랜잭션
+ commit;
+ select * from t1;
+ 
+• T2 트랜잭션 
+ commit; 
+ select * from t1;
+ 
+ select name, setting, unit
+ from pg_catalog.pg_settings 
+ where name like '%old_snapshot_threshold%'
+ 
+ alter system set old_snapshot_threshold = 1;
+ $ sudo systemctl restart postgresql
+ 
+psql> show old_snapshot_threshold ;
+ 
+• T1 트랜잭션
+ select * from t;
+ update t set point = 1000 ;
+ select * from heap_page('t',0);
+ select *, pg_sleep(60) from t;
+ 
+• T2 트랜잭션
+ Vacuum verbose t;
+  
+• T1 트랜잭션
+ select *, pg_sleep(60) from t; 
+
+
+
+4. 단일 페이지 정리와 HOT 업데이트
+
+4.1 Fillfactor 
+
+ drop table t; 
+ create table t( id integer, name char(3), point integer);
+ alter table t set(fillfactor=70);
+ insert into t values(1, 'aaa', 1000),(2,'bbb',2000),(3,'ccc',3000) ; 
+ select a.relname
+      , split_part(a.setting,'=',1) as param
+      , split_part(a.setting,'=',2) as value
+ from( select relname, unnest(reloptions) setting
+ from pg_class
+ where relname = 't' ) a ;
+
+
+
+4.2 단일 페이지 정리(Single Page Cleanup)
+
+• 테이블, 인덱스 생성
+ create table t1(id integer, name char(2000)) with(fillfactor = 75);
+ create index t1_id on t1(id);
+ create index t1_name on t1(name);
+ alter table t1 set(autovacuum_enabled=false);
+
+• 1건 insert, 3건 update
+ insert into t1 values(1, 'a');
+ update t1 set name = 'b' ;
+ update t1 set name = 'c' ;
+ update t1 set name = 'd' ;
+ 
+
+# 페이지 정보 조회
+ 
+ DROP function heap_page(relname text,pageno integer);
+ CREATE FUNCTION heap_page(relname text, pageno integer)
+ RETURNS TABLE(ctid tid, state text, xmin text, xmax text, hhu text, hot text, t_ctid tid)
+  AS $$
+ SELECT(pageno,lp)::text::tid AS ctid,
+	 CASE lp_flags
+	 WHEN 0 THEN 'unused'
+	 WHEN 1 THEN 'normal'
+	 WHEN 2 THEN 'redirect to '||lp_off
+	 WHEN 3 THEN 'dead'
+	 END AS state,
+	 t_xmin || CASE
+	 WHEN(t_infomask & 256) > 0 THEN 'committed'
+	 WHEN(t_infomask & 512) > 0 THEN 'aborted'
+	 ELSE 'active'
+	 END AS xmin,
+	 t_xmax || CASE
+	 WHEN(t_infomask & 1024) > 0 THEN 'committed'
+	 WHEN(t_infomask & 2048) > 0 THEN 'aborted'
+	 ELSE 'active'
+	 END AS xmax,
+	 CASE WHEN(t_infomask2 & 16384) > 0 THEN 't' END AS hhu,
+			CASE WHEN(t_infomask2 & 32768) > 0 THEN 't' END AS hot,
+			t_ctid
+ FROM heap_page_items(get_raw_page(relname,pageno))
+ ORDER BY lp;
+ $$ LANGUAGE sql;
+ select * from heap_page('t1',0) ;
+  
+• 인덱스 페이지 상태 조회
+ SELECT itemoffset, ctid, dead FROM bt_page_items('t1_name',1) ;
+ SELECT itemoffset, ctid, dead FROM bt_page_items('t1_id',1) ;
+
+• 페이지 임계치 조회
+ SELECT lower, upper, pagesize FROM page_header(get_raw_page('t1',0));
+
+• 단일 페이지 정리 트리거 발생 
+ select * from t1; 
+ select * from heap_page('t1',0);
+ SELECT lower, upper, pagesize FROM page_header(get_raw_page('t1',0));
+
+• 인덱스 페이지 조회 
+ SELECT itemoffset, ctid, dead FROM bt_page_items('t1_name',1) ;
+ SELECT itemoffset, ctid, dead FROM bt_page_items('t1_id',1) ;
+
+ explain(analyze, costs off)
+ postgres-# select * from t1 where id = 1;
+ SELECT itemoffset, ctid, dead FROM bt_page_items('t1_id',1) ;
+ insert into t1 values(2, 'b'); 
+ insert into t1 values(3, 'c');
+ select * from heap_page('t1',0);
+
+ create extension pg_freespacemap ;
+ SELECT *, round(100 * avail/8192 ,2) as "freespace ratio"
+ FROM pg_freespace('t1');
+
+• Vacuum 테이블 수행 후
+ Vacuum t1 ; 
+ select * from heap_page('t1',0);
+ SELECT *, round(100 * avail/8192 ,2) as "freespace ratio" FROM pg_freespace('t1');
+ SELECT itemoffset, ctid, dead FROM bt_page_items('t1_name',1) ;
+ SELECT itemoffset, ctid, dead FROM bt_page_items('t1_id',1) ;
+
+
+
+4.3 HOT(Heap Only Tuple) Update 
+
+#  HOT 업데이트 과정 예제
+
+• T1 테이블 생성
+ drop table t1; 
+ create table t1(id integer, name char(2000)) with(fillfactor = 75);
+ create index t1_id on t1(id);
+ alter table t1 set(autovacuum_enabled=false);
+ 
+• 1건 insert, 3건 update
+ insert into t1 values(1, 'a');
+ update t1 set name = 'b' ;
+ update t1 set name = 'c' ;
+ update t1 set name = 'd' ;
+ select * from heap_page('t1',0) ;
+ SELECT itemoffset, ctid, dead FROM bt_page_items('t1_id',1) ;
+ update t1 set name = 'f';
+ select * from heap_page('t1',0) ;
+ 
+ update t1 set name = 'g';
+ update t1 set name = 'h';
+ update t1 set name = 'i';
+ select * from heap_page('t1',0) ;
+ 
+ SELECT itemoffset, ctid, dead FROM bt_page_items('t1_id',1) ;
+ analyze t1 ;
+
+ select   c.oid::regclass::text AS table 
+		, c.reltuples 
+		, c.relpages 
+		, n_tup_upd
+		, n_tup_hot_upd
+		, round(coalesce((n_tup_hot_upd::numeric/nullif(n_tup_upd::numeric,0)),0)*100,1) hotratio
+		, pg_size_pretty(pg_indexes_size(c.oid)) as index_size
+		, pg_size_pretty(pg_table_size(c.oid))  as table_size 
+		, pg_stat_get_live_tuples(c.oid) AS live_tuple
+		, pg_stat_get_dead_tuples(c.oid) AS dead_tupple
+ from pg_class c , pg_stat_user_tables p
+ where 1=1
+ and  c.relname = 't1'
+ and c.relname = p.relname ;
+   
+• Fillfactor 설정과 HOT UPDATE 테스트 
+ create table emp_org( empno numeric(5,0) NOT NULL,
+    ename character varying(10),
+    job character varying(9),
+    mgr numeric(5,0),
+    hiredate timestamp(0),
+    sal numeric(7,2),
+    comm numeric(7,2),
+    deptno numeric(2,0),
+    sido_nm character varying(100) );
+
+ insert into emp_org
+ select i, chr(65+mod(i,26))||i::text||'NM'
+      ,case when mod(i,10000)=0 then 'PRESIDENT'
+            when mod(i,1000) = 0 then 'MANAGER'
+            when mod(i,3)=0 then 'SALESMAN'
+            when mod(i,3)=1 then 'ANALYST'
+            when mod(i,3)=2 then 'CLERK' end as job
+      ,case when mod(i,10000)= 0 then null
+            when mod(i,1000)= 1 then 10000
+            when i >= 9000 then 1000
+      , current_date - i
+            else ceiling((i+1000)/1000)*1000 end as mgr
+      , trunc(random() * 10000) as sal
+      , trunc((random() * 10000)*random()*10)::float as comm
+      , mod(i,12)+1             as deptno
+      , case when mod(i,3) = 0 then 'ganwon'
+             when mod(i,3) = 1 then 'busan'
+             else                   'seoul' end as sido_nm
+ from generate_series(1,10000) a(i);
+ create index emp_ord_pk on emp_org(empno);
+ 
+ 
+• 수행 쿼리 – UPDATE 5개, SELECT 1개
+Update-1
+ update emp_org 
+    set comm =(select trunc(sal*random()*10)::numeric )
+    where empno between 1 and 2000  ;    
+
+Update-2
+ update emp_org 
+    set comm =(select trunc(sal*random()*10)::numeric )
+    where empno between 2001 and 4000  ;
+
+Update-3
+ update emp_org 
+    set comm =(select trunc(sal*random()*10)::numeric )
+    where empno between 4001 and 6000  ;
+
+Update-4
+ update emp_org 
+    where empno between 6001 and 8000  ;
+
+Update-5
+ update emp_org 
+
+select-1
+ select *
+    set comm =(select trunc(sal*random()*10)::numeric )
+    set comm =(select trunc(sal*random()*10)::numeric )
+    where empno between 8001 and 10000  ;
+ from emp_org
+ where empno =(select(trunc(random()*10000)::numeric)) ;
+   
+• Fillfactor 설정에 따른 Update 전, 후 테이블, 인덱스 크기 비교하기
+ select  c.oid::regclass::text AS table 
+	, c.reltuples
+	,c.reloptions
+	, c.relpages 
+	, n_tup_upd
+	, n_tup_hot_upd
+	,round(coalesce((n_tup_hot_upd::numeric/nullif(n_tup_upd::numeric,0)),0) *100,1) hotratio
+	, pg_size_pretty(pg_indexes_size(c.oid)) as index_size
+	, pg_size_pretty(pg_table_size(c.oid))  as table_size 
+	, pg_stat_get_live_tuples(c.oid) AS live_tuple
+	, pg_stat_get_dead_tuples(c.oid) AS dead_tupple
+ from pg_class c , pg_stat_user_tables p
+ where c.relname = 'emp_org' and c.relname = p.relname ;
+
+
+
+5. MVCC(Multi Version Concurrency Control)
+
+ 5.1 MVCC란? 
+
+• 테이블에 Vacuum freeze를 적용하여 튜플의 Frozen 여부를 확인하기
+ select lp,t_xmin,t_xmax, t_infomask,substring(cast(t_infomask::bit(16) as text),7,1) flag
+ from heap_page_items(get_raw_page('t1',0));
+
+ Vacuum freeze t1 ;
+ 
+ select lp, t_xmin, t_xmax, t_infomask,substring(cast(t_infomask::bit(16) as text),7,1) flag
+ from heap_page_items(get_raw_page('t1',0));
+ 
+ select pg_current_xact_id() 
+ where relname = 't1';
+ 
+ select relname, relfrozenxid from pg_catalog.pg_class
+
+
+
+5.3 Age 
+
+ drop table t1;
+ create table t1(id integer, name varchar(3)) ;
+ select relname, age(relfrozenxid) age, relfrozenxid from pg_class where relname = 't1';
+ 
+ insert into t1 values(1,'aaa') ;
+ select 'table: '||relname as name, age(relfrozenxid) as age, relfrozenxid
+ from pg_catalog.pg_class where relname = 't1'
+ union all
+ select 'tuple: '||id as name, age(xmin) as age, xmin
+ from t1 ;
+ 
+ 
+ 
+6. Vacuum and Autovacuum
+ 
+ 6.1 Vacuum
+
+• vacuum이 수행되는 과정을 살펴보기
+ drop table t ;
+ create table t(id integer, name char(3), point integer);
+ create index idx1_t on t(name);
+ insert into t values(1, 'aaa', 1000);
+ select blkno, all_visible, all_frozen from pg_visibility('t') ;
+ 
+ update t set name = 'ccc';
+ update t set name = 'bbb';
+ SELECT * FROM heap_page('t',0);
+ 
+ select itemoffset, ctid, dead from bt_page_items('idx1_t',1);
+ 
+ Vacuum t;
+ SELECT * FROM heap_page('t',0);
+ 
+ select itemoffset, ctid, dead, htid from  bt_page_items('idx1_t',1);
+ 
+ select blkno, all_visible, all_frozen from pg_visibility('t');
+ 
+ update t set name = 'ccc';
+ update t set name = 'bbb';
+ SELECT * FROM heap_page('t',0);
+ 
+ select itemoffset, ctid, dead from bt_page_items('idx1_t',1);
+
+ select blkno, all_visible, all_frozen from pg_visibility('t');
+
+ Vacuum full t ; 
+
+ select blkno, all_visible, all_frozen from pg_visibility('t');
+
+ select lp, t_xmin, t_xmax, t_infomask, substring(cast(t_infomask::bit(16) as text),7,1) flag 
+ from heap_page_items(get_raw_page('t',0));
+
+ Vacuum t; 
+ select blkno, all_visible, all_frozen from pg_visibility('t');
+
+6.1.1 Vacuum 진행 단계
+
+• Vacuuming Indexes
+ select current_setting('min_parallel_index_scan_size')  ;
+ create table t1(id integer, name char(2000)) with(Vacuum_truncate = false);
+
+
+# Performing final cleanup
+
+ select relname, relpages, reltuples from pg_class where relname = 't';
+ select count(*) from pg_stats where tablename = 't';
+
+
+
+6.1.2 Frozen XID 제어 
+
+• vacuum_freeze_min_age
+ select name, setting, short_desc
+ from pg_settings where name = 'vacuum_freeze_min_age' ;
+
+ alter system set vacuum_freeze_min_age = 1000; 
+ select pg_reload_conf();  
+
+ drop table t1 ;
+ create table T1(id integer, name char(2000)) with(fillfactor = 50,autovacuum_enabled = off);
+ insert into t1 select i id, 'aaa' name from generate_series(1,100) a(i);
+
+ CREATE OR REPLACE FUNCTION public.heap_pageinfo(relname text, pageno_from integer, pageno_to integer)
+ RETURNS TABLE(ctid tid, state text, age integer, xmin text, xmax text)
+ LANGUAGE sql
+ AS $function$
+ SELECT(pageno,lp)::text::tid AS ctid,
+	CASE lp_flags
+	WHEN 0 THEN 'unused'
+	WHEN 1 THEN 'normal'
+	WHEN 2 THEN 'redirect to '||lp_off
+	WHEN 3 THEN 'dead'
+	END AS state,
+	age(t_xmin) age,
+	t_xmin || CASE
+	WHEN(t_infomask & 256+512) = 256+512 THEN ' frozen'
+	WHEN(t_infomask & 256) > 0 THEN ' committed'
+	WHEN(t_infomask & 512) > 0 THEN ' aborted'
+	ELSE ' active'
+	END AS xmin,
+	t_xmax || CASE
+	WHEN(t_infomask & 1024) > 0 THEN ' committed'
+	WHEN(t_infomask & 2048) > 0 THEN ' aborted'
+	ELSE '  active'
+	END AS xmax
+ FROM generate_series(pageno_from, pageno_to) p(pageno),
+ heap_page_items(get_raw_page(relname, pageno))
+ ORDER BY pageno, lp;
+ $function$ ;
+ 
+ select * from heap_pageinfo('t1',0,1);
+ select relname,relfrozenxid,age(relfrozenxid) from pg_class where relname = 't1';
+ select count(*) from pg_visibility('t1') ;
+ select blkno, all_visible, all_frozen from pg_visibility('t1') limit 2;
+ 
+ CREATE or REPLACE procedure age_grow(ageno integer)
+ language plpgsql
+ as $$
+ declare i integer ;
+        b_xid integer ;
+ begin  
+ for i in 1..ageno loop
+        select pg_current_xact_id() into b_xid;
+        commit;
+     end loop ;
+ end ;
+ $$ ;
+ 
+ call age_grow(1000);
+
+ select relname,relfrozenxid,age(relfrozenxid) from pg_class where relname = 't1';
+ select * from heap_pageinfo('t1',0,1);
+ update t1 set name = 'ccc' where id = 1;
+ select * from heap_pageinfo('t1',0,1);
+ select blkno, all_visible, all_frozen from pg_visibility('t1') limit 2;
+ 
+ vacuum t1 ;
+ 
+ select relname,relfrozenxid,age(relfrozenxid) from pg_class where relname = 't1';
+ select * from heap_pageinfo('t1',0,1);
+ select blkno, all_visible, all_frozen from pg_visibility('t1') limit 2;
+ select all_visible, all_frozen, count(*) as cnt
+ from pg_visibility('t1') 
+ group by all_visible, all_frozen;
+
+ drop table t2 ;
+ create table t2(id integer, name char(2000)) with(fillfactor = 50,autovacuum_enabled = off);
+ insert into t2 select i id, 'aaa' name from generate_series(1,50) a(i);
+ select count(*) from pg_visibility('t2') ;
+ 
+ select relname,relfrozenxid,age(relfrozenxid) from pg_class where relname = 't2';
+ select * from heap_pageinfo('t2',0,1);
+ update t2 set name = 'ccc' where id = 1;
+ select * from heap_pageinfo('t2',0,1);
+ select blkno, all_visible, all_frozen from pg_visibility('t2') limit 2;
+ 
+ vacuum t2 ;
+ select * from heap_pageinfo('t2',0,1);
+ select all_visible, all_frozen, count(*) as cnt
+ from pg_visibility('t2')
+ group by all_visible, all_frozen;
+ select relname,relfrozenxid,age(relfrozenxid) from pg_class where relname = 't2';
+
+•  Vacuum_freeze_table_age
+ select name, setting, short_desc
+ from pg_settings where name like '%vacuum_freeze_table_age%' ;
+
+ alter system set vacuum_freeze_table_age = 1100;
+ SELECT pg_reload_conf();
+
+ call age_grow(100);
+ Vacuum verbose t1;
+ select * from heap_pageinfo('t1',0,1);
+ select all_visible, all_frozen, count(*) cnt from  pg_visibility('t1') 
+ group by all_visible, all_frozen;
+ select relname , relfrozenxid, age(relfrozenxid) from pg_class where relname = 't1';
+
+• Vacuum freeze 
+ select * from heap_pageinfo('t1',0,1);
+ select blkno, all_visible, all_frozen from pg_visibility('t1') limit 2;
+ vacuum freeze t1;
+ select * from heap_pageinfo('t1',0,1);
+ select blkno, all_visible, all_frozen from pg_visibility('t1') limit 2;
+ select relname,relfrozenxid,age(relfrozenxid) age, pg_current_xact_id() 
+ from pg_class where relname = 't1';
+
+ select all_visible, all_frozen, count(*) cnt from  pg_visibility('t1')
+ group by all_visible, all_frozen;
+
+
+
+6.2 Autovacuum 
+
+• 파라미터 테이블 레벨에서 변경하기.
+ create table t1( c1 integer, c2 char(10)) with(autovacuum_enabled= off) ;
+ alter table t1 set(autovacuum_enabled=off) ;
+ 
+• 함수 생성
+ CREATE FUNCTION get_param(param text, boid oid) RETURNS text
+ AS $$
+ SELECT coalesce(
+	 (select value
+	 from( select oid
+			  , split_part(setting,'=',1) as name
+			  , split_part(setting,'=',2) as value 
+		   from( select oid , unnest(reloptions) setting from pg_class where oid = boid) a ) a
+		   where name = param
+		 ),( select setting as value from pg_settings where name = param)
+ )::text ;
+ $$ LANGUAGE sql;
+ 
+• 모니터링을 위한 VIEW 생성하기
+ CREATE OR replace VIEW v_autovcum
+ as
+ select pgc.relname as relname 
+	, st.n_mod_since_analyze as analtup
+	, st.n_ins_since_Vacuum as instup
+	, st.n_dead_tup as deadtup
+	, pgc.reltuples
+	deadtup
+	reltuples,0)::numeric as max_instup
+	analytup
+	,get_param('autovacuum_vacuum_threshold',pgc.oid)::numeric+get_param('autovacuum_
+	vacuum_scale_factor',pgc.oid)::numeric*greatest(pgc.reltuples,0)::numeric as max_
+	,get_param('autovacuum_vacuum_insert_threshold',pgc.oid)::numeric+get_
+	param('autovacuum_vacuum_insert_scale_factor',pgc.oid)::numeric*greatest(pgc.
+	,get_param('autovacuum_analyze_threshold',pgc.oid)::numeric+get_param('autovacuum_
+	analyze_scale_factor',pgc.oid)::numeric*greatest(pgc.reltuples,0)::numeric as max_
+	, st.last_autoanalyze
+	, st.last_autovacuum
+ from pg_class pgc ,pg_stat_all_tables st 
+ where st.relid = pgc.oid ;
+
+• autovacuum 수행 주기를 5초로 변경
+ alter system set autovacuum_naptime = '5s';
+ select pg_reload_conf();
+ 
+ • 테이블 생성 
+ drop table t1;
+ create table t1(id integer, name char(3));
+ insert into t1
+ select i as id, 'aaa' as name from generate_series(1,1000) a(i) ;
+ select * from v_autovcum where relname='t1';
+ update t1 set name = 'bbb' where id between 1 and 250;
+ select * from v_autovcum where relname='t1'; 
+ update t1 set name = 'bbb' where id = 251;
+ select * from  v_autovcum where relname='t1'; 
+  
+ alter table t1 set( autovacuum_vacuum_scale_factor = 0 ,autovacuum_vacuum_threshold = 100000 ); 
+ select name, setting, short_desc
+ from pg_settings where name = 'autovacuum_freeze_max_age' ; 
+ 
+ SELECT datname, datfrozenxid, age(datfrozenxid) FROM pg_database;
+
+ autovacuum_enabled = off 
+ autovacuum_freeze_min_age= 50000 
+ autovacuum_freeze_table_age= 150000
+ autovacuum_freeze_max_age = 200000
+
+ drop table t1;
+ create table t1(id integer, name char(2000)) with(fillfactor = 50,autovacuum_enabled = off);
+ alter table t1 set(autovacuum_freeze_min_age= 50000);
+ alter table t1 set(autovacuum_freeze_table_age= 150000);
+ alter table t1 set(autovacuum_freeze_max_age = 200000);
+ insert into t1 select i id, 'aaa' name from generate_series(1,10) a(i);
+ select relname,relfrozenxid,age(relfrozenxid) from pg_class where relname = 't1';
+  Vacuum t1 ; 
+ select blkno, all_visible, all_frozen from pg_visibility('t1') limit 2;
+ select * from heap_pageinfo('t1',0,1);
+ 
+ call age_grow(100000) ;
+ update t1 set name='bbb' where id = 1;
+ select * from heap_pageinfo('t1',0,1);
+ select blkno, all_visible, all_frozen from pg_visibility('t1') limit 2;
+ call age_grow(100000) ;
+ select * from heap_pageinfo('t1',0,1);
+ select blkno, all_visible, all_frozen from pg_visibility('t1') limit 2;
+ select * from v_autovcum where relname='t1';
+ select relname,relfrozenxid,age(relfrozenxid) from pg_class where relname = 't1';
+ alter system set log_autovacuum_min_duration = 0;
+ 
