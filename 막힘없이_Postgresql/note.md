@@ -2080,3 +2080,1462 @@ Vacuum 성능을 5배~10배 개선할 수 있다.
 
  또한, vacuum_cost_page_miss 값은 대 0으로 설정하는 것을 권장하고 있다.
 
+# 3장 Lock
+
+3종류의 락이 있다.
+
+Object level lock (객체 레벨 락)
+
+Row level lock (행 레벨 락 )
+
+Memory level lock (메모리 락)
+
+
+
+테이블과 행 레벨 락의 경우 트랜잭션을 시작하고 끝날때까지 락을 유지하는 시간을 길게 보장한다.
+
+이러한 이유로 Heavy-Weight Lock 이라고 한다.
+
+공유 메모리 구조를 보호하는 메모리 락은 유지 시간이 짧고, 락 모드도 공유, 독점 2모드로 light-weight-lock 이라고 한다.
+
+마지막으로 특정 버퍼에 변경 과정에 대해 반드시 획득해야 하는 buffer pin 락이 존재한다
+
+## 1. 객체 레벨 락 
+
+객체란 테이블, 인덱스, 뷰 등을 의미하는데, 객체에 대해 보호하는 역할.
+
+객체 락은 서버의 공유 메모리의 lock space 영역에 저장된다.
+
+공유 메모리에는 서버 프로세스 또는 Prepared 트랜잭션당 객체를 위한 공간이 있어, 한번에 max_locks_per_transaction 만큼의 락을 획득할 수 있다. 기본값은 64이다
+
+모든 오브젝트 락 정보는 pg_catalog.pg_locks 뷰를 통해 확인할 수 있다.
+
+파티션 개수가 많다면 파티션 테이블을 조회하거나 업데이트할 때 모든 파티션 객체에 대해 락을 획득해야 해서 객체 락 수가 많아진다. 파티션 테이블을 조회하거나 업데이트할때 관련 모든 파티션에 락이 걸리게 된다. 
+
+파티션 테이블이 많은 환경에서는 max_locks_per_transaction 값을 늘려주는것이 좋다
+
+### 1.1 객체 타입
+
+pg_locks 뷰의 locktype 컬럼은 트랜잭션 처리 중 현재 락이 설정된 모든 객체 정보를 보여준다.
+
+| Locktype      | 설명                                                         |
+| ------------- | ------------------------------------------------------------ |
+| Advisory      | 애플리케이션에서 세션간 동기화를 위해 설정한 사용자 락       |
+| Extend        | Relation 확장을 위한 락                                      |
+| Frozenid      | pg-database.datfrozenxid 및 pg_database.datminmxid 업데이트를 위한 락 |
+| Object        | Non-relation 데이터베이스 객체에 대한 락                     |
+| Page          | Relation의 page 변경 시 필요한 락                            |
+| Relation      | Relation 변경 시 필요한 락                                   |
+| Spectoken     | 추측성 입력에 대한 락                                        |
+| Transactionid | 트랜잭션이 완료되기를 대기하는 락                            |
+| Tuple         | 튜플 변경 시 필요한 락                                       |
+| Userlock      | 사용자 락                                                    |
+| Virtualxid    | 가상트랜잭션 ID를 획득하기 위한 락                           |
+
+```
+select * from pg_catalog.pg_locks
+
+relation,17909,12073,,,,,,,,3/57146,20015,AccessShareLock,true,true,
+virtualxid,,,,,3/57146,,,,,3/57146,20015,ExclusiveLock,true,true,
+```
+
+### 1.2 객체 락 모드
+
+크게 8가지의 객체 락 모드를 제공한다. 
+
+* https://www.postgresql.org/docs/current/explicit-locking.html
+
+| Lock Mode                   | SQL Command                                                  | 설명                                                         |
+| --------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| Access Share (AS)           | `SELECT`                                                     | 테이블에 대한 **읽기 전용**(SELECT) 작업 시 획득되는 잠금. 다른 쓰기 잠금(Exclusive 등)과는 충돌하지만, 같은 Access Share끼리는 충돌하지 않습니다. |
+| Row Share (RS)              | `SELECT FOR UPDATE`,<br>`SELECT FOR SHARE`                   | SELECT 시에 행 단위 잠금이 필요한 경우(예: `SELECT FOR UPDATE`) 획득되는 잠금. Exclusive, Access Exclusive 등과 충돌하며, 단순 읽기보다 강도가 높은 잠금입니다. |
+| Row Exclusive (RE)          | `INSERT`, `UPDATE`, `DELETE`                                 | **행을 변경**하는 DML 작업 시 획득되는 잠금. 동시에 같은 테이블에 대한 Share 이상의 잠금 모드와 충돌하는 경우가 많습니다. |
+| Share Update Exclusive (SU) | `VACUUM`(일반),<br>`ALTER TABLE`,<br>`CREATE INDEX CONCURRENTLY` | 테이블을 크게 독점하지 않고도 메타데이터나 인덱스 작업을 수행할 때 획득되는 잠금. 다른 Share Update Exclusive나 Exclusive, Access Exclusive 등과 충돌할 수 있습니다. |
+| Share (S)                   | `CREATE INDEX`                                               | 테이블 전체에 대한 **공유 잠금**. 보통 읽기 작업과는 양립 가능하나, Row Exclusive 이상의 쓰기 잠금과 충돌하는 경우가 많습니다. |
+| Share Row Exclusive (SRE)   | `CREATE TRIGGER`,<br>`ALTER TABLE`                           | Share + Row Exclusive 성격을 모두 가진 잠금. 트리거 생성, 테이블 스키마 변경 등에서 사용됩니다. 같은 SRE나 그 이상의 잠금 모드와 충돌합니다. |
+| Exclusive (E)               | `REFRESH MATERIALIZED VIEW`                                  | 테이블에 대한 **독점 잠금**. 대부분의 다른 잠금 모드와 충돌하며, 동시 접근을 강하게 제한합니다. |
+| Access Exclusive (AE)       | `DROP TABLE`, `TRUNCATE`,<br>`VACUUM FULL`, `LOCK TABLE`,<br>`REINDEX`, `ALTER TABLE` 등 | 가장 강력한 잠금 모드로, **모든** 다른 락 모드와 충돌합니다. 테이블 구조를 완전히 바꾸거나 삭제, 재색인 등의 작업 시에 사용됩니다. |
+
+## 2. 행 레벨 락
+
+2가지 방식으로 row 레벨 락을 구현한다.
+
+트랜잭션 id인 xmin, xmax의 플래그 정보를 사용하는 방법
+
+명시적으로 select for update 쿼리
+
+튜플 변경시 공통적으로 객체 락은 relation 락을 획득하고 특정 트랜잭션 id를 독점 모드로 락을 획득한다. 
+
+row락의 경우 메모리 상관이 없다. 트랜잭션 id별 독점으로 유지한다
+
+### 2.1 행 레벨 락 모드
+
+크게 4가지 모드로, 2개의 독점 모드와 2개의 공유 모드로 구분할 수 있따.
+
+* for update
+* for no key update : for update와 같은 기능을 하지만 unique 인덱스와 관련되지 않은 모든 컬럼에 대한 변경을 위해 설정. 
+
+for update로 로우에 락을 걸게 되면, 해당 튜플의 t_infomask 비트열이 lock_only가 t가 된다
+
+```
+select * from fn_lockmode ('t', 0);
+```
+
+
+
+공유 락은 for share와 for key share 두 모드가 있따
+
+* for share : select for share 결과로 행을 읽을 수 있지만, 다른 트랜잭션에서는 행을 변경하지 못한다.
+* for key share : 외래키를 확인시 자동으로 이 모드 사용
+
+공유 모드로 락을 획득하면 lock_only가 t가 된다
+
+### 2.3 튜플 락 대기
+
+튜플 락 대기 현상은 서로 다른 트랜잭션이 동일 튜플을 변경할 때 발생한다.
+
+튜플 변경 전 트랜잭션은 반드시 독점 모드로 락을 획득해야 하기 때문.
+
+튜플 락 획득 과정
+
+1. 튜플이 속한 Relation에 대해 RowExclusiveLock 획득
+2. Tuple에 대해 ExclusiveLock 획득
+3. 튜플의 xmax 및 정보 비트에 락 여부를 표시하고 변경시점의 transaction id에 exclusiveLock 획득
+4. xamx에 트랜잭션 관련 필요한 정보 비트 설정
+5. tuple 락 해제
+
+동일 튜플을 업데이트하는 모든 트랜잭션은 모두 대기상태에 있게 됌
+
+내부적으로 대기열에서 들어온 순서대로 트랜잭션이 락 획득을 대기함.
+
+락을 대기하고 있는 상태에서 락을 최초로 홀더 한 프로세스를 종료하면 락을 요청한 순서대로 락이 해제되고 새로운 락 홀더 프로세스가 되는 것을 알 수 있다.
+
+#### Lock_timeout
+
+락 대기시간이 무한정 길어질 수 있으므로 제한을 두는 lock_timeout 파라미터 사용 가능
+
+기본값은 0ms로 무한 대이다.
+
+```
+set lock_timeout = 10000;
+
+update t set pint = point + 100 where id = 1;
+```
+
+#### nowait lock
+
+nowait 옵션으로 조회하면 락대기 상황에서 대기 큐에 트랜잭션을 두지 않고 바로 에러 발생 가능. 
+
+애플리케이션에서 오류 처리 가능
+
+```
+select * from t where id = 1 for update nowait;
+```
+
+#### skip locked
+
+특정 튜플에 락이 걸린 상태로 skip locked 옵션으로 조회하면 락이 걸린 튜플은 건너 뛰고 나머지 튜플에만 락 획득 가능. 잠재적 데이터 불일치 조심 
+
+### 2.4 Dead Lock
+
+T1, T2 트랜잭션이 서로 다른 리소스에 대해 락을 획득한 상황에서 T1 트랜잭션이 T2 트랜잭션의 리소스에 락을 시도하고 T2가 T1의 리소스에 락을 획득하려고 시도할 경우 데드락에 빠질 수 있음.
+
+즉 트랜잭션이 락 Holder 이면서 Waiter가 되면 교착 상태 가능
+
+pg의 경우 deadlock_timeout 파라미터를 통해 데드락 상황을 일정 주기로 체크하여 감시한다
+
+* 기본값은 1000ms
+
+데드락 감지되면 원인 트랜잭션은 롤백 처리. 
+
+데드락이 발생할 경우 상황 분석 및, 관련 트랜잭션, 경합 발생 리소스, 원인 쿼리 및 이벤트 순서를 식별해야 한다
+
+pg 로그 파일을 확인하고, pg_stat_activity, pg_stat_database 시스템 뷰를 조회하여 프로세스 상태 및 데드락 발생 빈도를 확인해야 한다.
+
+## 3. 메모리 레벨 락
+
+메모리 수준 락은 공유 메모리 구조, 데이터 버퍼 및 기타 리소스를 관리하는데 필수적인 light-weight-lock, spinlock, buffer pin lock을 포함한다
+
+### 3.1 Light-Weight Lock (LWLocks)
+
+버퍼, 트랜잭션 테이블, 해시 테이블과 같은 공유 구조에 접근을 동기화하는데 사용되는 락
+
+대기 순서 없이 무작위로 여러 프로세스가 락을 획득 가능
+
+### 3.2 Spinlocks
+
+공유 메모리 구조를 보호하기 위한 가볍고 저렴한 락.
+
+compare-and-swap으로 구현되며 유일한 독점 모드 지원.
+
+### buffer pin lock
+
+프로세스가 원하는 버퍼를 읽기 위해서는 버퍼의 링크 정보를 가지고 있는 파티션된 해시 테이블에 접근해야 함.
+
+동시에 파티션 번호를 계산하고 해당 버퍼 파티션에 접근하기 위한 LWLock인 BufMappingLock을 획득함.
+
+동시성이 높은 버퍼 형태를 고려하여 128개로 구성됌.
+
+읽기는 공유모드, 변경을 위해서는 독점 모드로 된 락 획득. 
+
+![image-20250310152952291](./images//image-20250310152952291.png)
+
+원하는 버퍼를 찾으면 프로세스는 spinlock을 사용하여 버퍼 헤더에 접근하고, 대상 버퍼에 buffer pin lock을 설정 
+
+버퍼의 내용을 읽기 위해서 버퍼 디스크립터 배열에 buffer content lock 획득
+
+디스크에 읽혀지거나 쓰여질떄 IO in process 락 획득.
+
+### 3.4 WAL Buffer Lock
+
+WAL 버퍼를 디스크에 기록시 WALWriteLock으로 보호되고 한번에 WALWriter 백그라운드 프로세스에 의해 작업이 수행됌.
+
+WAL 레코드 생성시 WL insert spin lock을 획득하고, 레코드 페이지에 작성시 WAL InsertLock으로 보호
+
+# 4장 SQL Execution
+
+Postgresql은 SQL 파싱을 위한 공유 메모리 영역이 존재하기 안기 때문에, 동일 SQL을 실행하더라도 반복적으로 실행 계획을 최적화한다. 즉 실혱계획을 공유하지 못하는 구조이기 때문에 SQL 성능 최적화가 필요하다
+
+## 1. Cost BAsed Optimizer
+
+PG는 기본적으로 Cost based Optimizer(CBO)를 적용한다.
+
+CBO 옵티마이저는 통계 정보를 참조해 모든 방법의 비용을 비교하며 비용이 가장적은 실행계획을 선택.
+
+단, 비용 계싼은 어디까지나 예측값이다.
+
+### 1.1 CBO Cost
+
+CBO Cost 계산시 옵티마이저가 참조하는 시스템 파라미터는 pg_settings 뷰를 통해 확인할 수 있다.
+
+```sql
+select name, setting from pg_settings
+where name in ('seq_page_cost', 'random_page_cost', 'cpu_tuple_cost', 'cpu_index_tuple_cost', 'cpu_operator_cost')
+```
+
+CPU 관련 파라미터
+
+| 파라미터명           | 기본값 | 내용                                                         |
+| -------------------- | ------ | ------------------------------------------------------------ |
+| cpu_tuple_cost       | 0.01   | 쿼리 실행 중에 각 행을 처리하는 비용에 대한 추정치 값        |
+| cpu_index_tuple_cost | 0.005  | 인덱스 스캔 중 각 인덱스 항목을 처리하는 비용에 대한 추정치 값 |
+| cpu_operator_cost    | 0.0025 | 쿼리 실행 중에 각 오퍼레이션을 처리하는 비용에 대한 추정치 값 |
+
+IO 관련 파라미터
+
+| 파라미터명       | 기본값 | 내용                                                         |
+| ---------------- | ------ | ------------------------------------------------------------ |
+| seq_page_cost    | 1      | 디스크에서 순차적으로 fetch하는 Page의 비용 추정치           |
+| random_page_cost | 4      | 디스크에서 비 순차적(random)으로 fetch하는 page의 비용 추정치 |
+
+테이블 스캔 비용 계산시 seq_page_cost를 통한 계산 비용이 적으면 seq_scan 선택
+
+random_page_cost를 통한 비용 게싼이 적으면 index scan 선택
+
+하드웨어 디스크 속도 는 계속해서 빨라지고 있으므로 SSD를 적용하는 환경에서는 random_page_cost 값을 1이나 2로 작 게 설정해 index scan의 비중을 높여 최적화를 진행할 수 있다.
+
+#### Seq Scan Cost
+
+모든 테이블을 순차적으로 읽는 방식. full scan
+
+```sql
+ explain select * from t1;
+ 
+ Seq Scan on t1  (cost=0.00..155.00 rows=10000 width=12)
+```
+
+1. Seq Scan
+2. Cost는 ..기준으로 왼쪽이 예상 시작 비용, 오른쪽이 예쌍 총 비용
+3. rows 는 오퍼레이션 행 수의 추정치, 출력 결과 수 
+4. width 는 오퍼레이션에서 출력되는 행의 평균 바이트 너비 
+
+Seq Scan의 총 비용 계산 공식
+
+```
+총 비용 = I/O 비용 + CPU 비용
+
+= (seq_page_cost x relpage) + (cpu_tuple_cost x reltuples)
+```
+
+아래처럼?
+
+```
+select (relpages * 1) + (reltuples * 0.01)
+from pg_class where relname = 't1'
+```
+
+필터를 추가한다면?
+
+```
+SELECT
+      (relpages * 1)            -- 총 Block을 처리하는 I/O 비용 추정치
+    + (reltuples * 0.01)        -- 행을 처리하는 CPU 비용 추정치
+    + (reltuples * 0.0025)      -- Filter 오퍼레이션을 처리하는 CPU 비용 추정치
+    + (reltuples * 0.0025)      -- Filter 오퍼레이션을 처리하는 CPU 비용 추정치
+FROM pg_class
+WHERE relname = 't1';
+```
+
+#### Index Scan Cost
+
+인덱스 스캔은 Seq Scan보다 복잡하다
+
+`bt_metap` 함수는 PostgreSQL의 **pageinspect 확장(extension)**에서 제공하는 함수. 
+
+이 함수는 지정한 B-Tree 인덱스의 메타 페이지(meta page)에 저장된 정보를 조회하는 데 사용
+
+```sql
+select *
+from bt_metap('test1');
+
+```
+
+| 컬럼명                    | 예시 값 | 설명                                                         |
+| ------------------------- | ------- | ------------------------------------------------------------ |
+| magic                     | 29682   | B-Tree 인덱스의 매직 넘버(Magic Number)                      |
+| version                   | 4       | B-Tree 인덱스의 버전 (현재 PostgreSQL에서 기본적으로 사용하는 B-Tree 버전) |
+| root                      | 3       | 실제 루트 페이지 번호                                        |
+| level                     | 1       | 트리의 레벨 (0이 리프 페이지, 1이 루트+리프 구조인 경우도 있음) |
+| fastroot                  | 3       | 빠르게 접근할 수 있는 Fast Root 페이지 번호 (루트 페이지와 동일할 수도 있음) |
+| fastlevel                 | 1       | Fast Root 페이지의 레벨                                      |
+| oldest_btpo_xact          | 0       | 가장 오래된 B-Tree 페이지의 XID(트랜잭션 ID). 0이면 아직 기록된 트랜잭션이 없는 경우 |
+| last_cleanup_num_delpages | 0       | 최근에 정리(cleanup)된 페이지 수                             |
+| allequalimage             | true    | 모든 인덱스 키가 동일한지에 대한 플래그(true면 B-Tree 페이지의 키 값이 모두 동일하다는 의미) |
+
+Index Scan의 예상 시작 비용은 다음의 공식을 통해 예측할 수 있다. 
+
+```
+시작 비용 = {Ceil(log2(인덱스 로우)) + (인덱스 높이 + 1) x 50} x cpu_operator_cost
+```
+
+* `ceil`은 올림 함수로, 주어진 숫자를 넘지 않는 최소 정수가 아닌, 그 숫자보다 크거나 같은 최소의 정수로 올림하는 함수
+* `log2`는 밑이 2인 로그 함수로, 주어진 숫자가 2의 몇 제곱인지를 나타냅니다.
+   예를 들어, log2(8)은 3
+
+실행계획 분석
+
+```sql
+explain
+select *
+from t1
+where c1 > 6000;
+
+Index Scan using test1 on t1  (cost=0.29..143.28 rows=4000 width=12)
+  Index Cond: (c1 > 6000)
+```
+
+인덱스 비용은 인덱스 CPU Cost, 인덱스 I/O Cost, 테이블 CPU Cost, 테이블 I/O Cost의 합
+
+```
+인덱스 CPU Cost + 테이블 CPU cost + 인덱스 I/O Cost + 테이블 I/O Cost
+```
+
+각 오퍼레이션 비용은 아래의 규칙으로 계산된다.
+
+```
+인덱스 CPU cost= 선택도 x 인덱스 로우 x (cpu_index_tuple_cost+ qual_op_cost)
+
+테이블 CPU cost= 선택도 x 테이블 로우 x (cpu_tuple_cost)
+
+인덱스 I/0 cost = Ceil(선택도 x 인덱스 블록) x random_page_cost
+
+테이블 I/0 cost = max_l/O_cost + IndexCorrelation^2 x (min_IO_cost - max_l0_cost)
+
+max IO cost = 테이블 block x random_page_cost
+
+min IO cost =1 x random_page_cost + (Ce(-E × El|O|E page)-1)x seq_page_cost
+```
+
+qual_op_cost의 의미는 인덱스 사용의 적절성을 평가하는 비용
+
+```
+소스코드 - postgres/src/backend/utils/adt/selfuncs.c
+
+qual_po_cost = cpu_operator_cost * list_length(indexQuals)
+```
+
+* qual_op_cost 값이 "cpu_operator_cost 비용"과 인덱스 조건에 일치하는 개 수"의 곱
+  * cpu_operator_cost는 0.0025
+
+선택도(selectivity)는 where절에 인덱스가 스캔하는 비율을 의미.
+
+0~1까지 소수점으로 표시되며, pg_stats 테이블에 저장된 MVC(Most Common Value)와 histogram bounds로 계산된다.
+
+```
+select attname, most_common_vals, most_common_freqs, histogram_bounds from pg_stats
+where tablename = 't1' and attname = 'c1';
+```
+
+* attname은 열 이름, 인덱스 컬럼
+
+인덱스 사용하기 위해 중요한 통계정보 중 하나는 인덱스 구성 컬럼의 정렬 여부.
+
+```
+select tablename, attname, correlation from pg_stats where tablename = 't1' and attname = 'c1';
+```
+
+* c1의 correlation = 1 이면 정렬
+
+## 2 Postresql 통계 정보
+
+통계 정보는 데이터베이스, 테이블, 컬럼 단위로 수집된다.
+
+통계정보 수집은 analyze 명령어를 통한 수동 통계 정보 수집, autovacuum을 통한 자동 통계 수집 으로 나뉜다.
+
+### 2.1 수동  통게정보 수집
+
+데이터베이스 단위
+
+```
+analyze;
+```
+
+테이블 단위
+
+```
+analyze t1;
+```
+
+컬럼 단위
+
+```
+analyze t1(c1)
+```
+
+analyze 명령어에는 verbose와 skip_locked 옵션이 있다. verbose 옵션은 analyze 수행 시 진행 상 태를 표시한다.
+
+```
+analyze verbose t1;
+```
+
+skip_locked 옵션은 analyze 수행시 락이 발생한 테이블을 제외하고 수집하는 옵션이다.
+
+이를 방지하기 위해 추가된 옵션으로 락이 발생한 테이블은 skip하고 통계 정보를 수집한다.
+
+#### Autovaccum 통계 수집
+
+자동 통게 정보 수행되기 위해 autovaccum 파라미터가 On 이여야 하며 autoanalyzer를 수행하는 임곗값을 충족해야 한다
+
+```
+n_mode_since_analyze 
+> autovaccum_analyze_threshold(default : 50)
+  + autovaccum_analyze_scal_factor x 튜플 수 
+```
+
+
+
+#### 통계정보 수집이력
+
+통계정보 수집 이력은 pg_stat_user_tables 뷰 조회를 통해 알 수 있음. 
+
+```
+select schemaname,
+       relname,
+       n_tup_ins,
+       last_vacuum,
+       last_autovacuum,
+       last_analyze,
+       last_autoanalyze,
+       autovacuum_count,
+       analyze_count,
+       autoanalyze_count
+from pg_stat_user_tables
+where relname = 't1';
+```
+
+통계 정보 결과는 대표적인 카탈로그 테이블인 pg_class와 pg_stats 뷰를 통해 확인이 가능하다.
+
+pg_class는 테이블, 인덱스, 시퀀스 등 오브젝트 통계 정보가 저장되고 pg_stats는 컬럼 통계 정보 를 저장한다.
+
+#### null_frac
+
+특정 컬럼이 null이 차지하는 비율을 알 수 있다
+
+````####
+null count = pg_class.reltupls x pg_status.null_frac
+````
+
+#### n_distinct
+
+NDV(Numberof distinct value)는 테이블 컬럼의 레코드 종류 수를 의미
+
+아래 규칙에 따라 n_distinct에 저장됌
+
+- ﻿﻿컬럼의 NDV가 전체 건수의 10% 초과이면 -(NDV/ROWS)로 표시
+- ﻿﻿컬럼이 UNIQUE 하면 1로 표시
+- ﻿﻿컬럼의 NDV가 전체 건수의 10% 이하이면 NDV 값 그대로 표시
+
+#### Correlation
+
+테이블에 저장되는 물리적 컬럼의 값과 인덱스 생성시 논리적으로 정렬되는 컬럼의 상관관계를correlation으로 표시한다. correlation의 수치가 좋지 못한 경우 인덱스 스캔 비용이 높아져 다른 스캔 방식을 선택할 가능성이 높아진다. correlation 값은 1에서 1 사이의 값을 가지며 주어진 값에 따라 다음과 같은 의미가 있다. 
+
+| 구분                 | 설명                                              |
+| -------------------- | ------------------------------------------------- |
+| correlation = 1      | 테이블 행이 오름차순으로 저장됨                   |
+| correlation = -1     | 테이블 행이 내림차순으로 저장됨                   |
+| -1 < correlation < 1 | 테이블 행 저장과 논리적 정렬 사이의 일치 비율     |
+| correlation = 0      | 테이블 저장 컬럼과 논리적 순서 사이에 관계가 없음 |
+
+### 2.2 통게정보 관리
+
+autovaccum에 의해서만 자동 생성하다보면 테이블 성격에 따라 정보가 누락되거나 정확성이 떨어질 수 있음.
+
+이를 제어 해야 함
+
+#### Auto analyze X| O
+
+Autovacuum에 의한 자동 통계 정보 생성은 아래의 설정값에 따라 자동으로 생성된다.
+
+| 파라미터                        | Default | 내용                                                         |
+| ------------------------------- | ------- | ------------------------------------------------------------ |
+| autovacuum_analyze_scale_factor | 0.1     | 테이블 전체 건수 대비 10% 이상 insert, update, delete가 발생할 경우 통계정보 생성, 테이블 레벨에서 변경 가능 |
+| autovacuum_analyze_threshold    | 50      | 튜플이 50건 이상 insert, update, delete가 발생할 경우 통계정보 생성, 테이블 레벨에서 변경 가능 |
+
+아래처럼 테이블별로 변경 가능
+
+```
+alter table t1 set(autovaccum_analyze_scale_factor = 0.0)
+
+alter table t1 set(autovaccum_analyze_threshold = 500000); // 50만건마다 발생 
+```
+
+#### default_statistics_target
+
+통계정보는 기본적으로 샘플링 방식을 통해 수집된다. 테이블 전체 스캔을 하지 않기 때문에 대용량 테이블 통계정보도 빠르게 수집할 수 있다. 그러나, 테이블 크기에 비해 샘플링이 작을 경우 통계 정보의 정확도가 떨어질 수 있다.
+
+이경우 default_statistics_target의 값을 크게 적용하여 샘플링 크기를 높여 정확하게 생성할 수 있다.
+
+1. 시스템 레벨에서 변경
+
+```
+alter system set default_statistics_target = 200;
+```
+
+2. 테이블 컬럼 단위의 변경
+
+```
+alter table t1 alter column c1 set statistics 200;
+```
+
+#### 통계정보 제어
+
+NDV(number of Distinct) 수집시 테이블을 샘플링 하기 때문에 부정확한 정보를 수집할 수 있다
+
+특히 대규모 테이블에서. 이경우 수동으로 n_distinct 값을 변경한다
+
+```
+alter table 테이블명 alter column 컬럼명 set (ndistinct = 설정값)
+```
+
+n_distinct 값을 수동으로 설정할 때는 테이블 컬럼값의 변동이 적은 테이블에 적용하는 것 이 효과적이다.
+
+## 3. 실행 계획
+
+### 3.1 실행계획 추출 방법
+
+```
+explain 옵션 SQL
+
+
+옵션 구성 :
+- ANALYZE
+- VERBOSE
+- COSTS
+- BUFFERS
+- TIMING
+- FORMAT { TEXT | XML | JSON | YAML}
+
+EXPLAIN (ANALYZE, FORMAT JSON)
+SELECT *
+FROM t1
+WHERE c1 > 6000;
+```
+
+### 3.2 실행계획 분석
+
+```sql
+explain(analyze,buffers)
+ select *
+ from t1,t2
+ where t1.c1 = 100
+ and t1.c2 = t2.c1;
+```
+
+```
+Nested Loop  (cost=0.00..171.22 rows=1 width=14) (actual time=0.036..1.193 rows=1 loops=1)
+  Join Filter: (t1.c2 = t2.c1)
+  Rows Removed by Join Filter: 9
+  Buffers: shared hit=46
+  ->  Seq Scan on t1  (cost=0.00..170.00 rows=1 width=8) (actual time=0.027..1.182 rows=1 loops=1)
+        Filter: (c1 = 100)
+        Rows Removed by Filter: 9999
+        Buffers: shared hit=45
+  ->  Seq Scan on t2  (cost=0.00..1.10 rows=10 width=6) (actual time=0.003..0.005 rows=10 loops=1)
+        Buffers: shared hit=1
+Planning Time: 0.128 ms
+Execution Time: 1.215 ms
+
+```
+
+주요 오퍼레이션 보면 -> 표시로 들여쓰기이넫, 논리적 작업 단위의며 들여쓰기 단위로 정보 확인하면 된다
+
+![image-20250310173357547](./images//image-20250310173357547.png)
+
+#### Cost
+
+Cost는 통계정보를 참조한 예측 비용. 
+
+Rows는 총 조회 예상 레코드 건수
+
+width는 레코드의 펴윤 길이 
+
+#### Actual Time
+
+실제 SQL 응답 시간. 
+
+```
+(actual time=0.036..1.193 rows=1 loops=1)
+```
+
+.. 기준으로 왼쪽은 첫번째 레코드 조회에 걸리는 시간 오른쪽은 테이블 전체 레코드 조회 하는데 걸리는 시간
+
+rows는 실제 조회되는 전체 레코드 수, loops는 반복 수행 횟수
+
+#### Filter
+
+검색 조건에 해당하는 데이터를 추출하는것을 의미
+
+Rows Removed By Filter는 검색 조건으로 제거되는 레코드 수
+
+조건절로 인해 버려지는 레코드 수가 결과의 수랑 차이가 많다면 인덱스 고려
+
+#### Buffers
+
+쿼리 노드를 수행하는데 스캔하는 블록 수.
+
+* buffers shared hit = 46은 46블록을 읽었다는 의미
+
+| Buffer 구분    | 내용                                                         |
+| -------------- | ------------------------------------------------------------ |
+| Shared hit     | Shared buffer에서 읽는 블록 수, Disk에서 읽은 블록 수는 제외 |
+| Shared Reads   | Disk에서 읽은 블록 수                                        |
+| Shared Written | Shared buffer 공간 확보를 위해 Disk에 기록하고 shared buffer에서 삭제된 블록 수 |
+| Temp Read      | Hash, sort, Materialize 연산을 사용하는데 읽는 Temp 영역의 블록 수 |
+| Temp Written   | Hash, sort, Materialize 연산을 사용하는데 사용한 Temp에서 삭제한 블록 수 |
+
+#### elapsed Time
+
+실행 계획을 생성하는데 소요되는 Planning Time이 0.264ms, SQL 실행 시간인 Execution Time은 2.729ms이다. 따라서, 총 응답 시간은 이 두 시간이 합쳐진 2.993ms가 된다.
+
+#### 조인 순서
+
+```sql
+explain
+select *
+from t1
+where c1 = (select c1
+            from t2
+            where c2 in ('A'));
+```
+
+![image-20250310173925847](./images//image-20250310173925847.png)
+
+같은 레벨의 노드는 상단 노드를 Outer 집합으로 조인한다.
+
+#### Nested loop join
+
+Nested loop 조인의 경우 Outer 테이블이 선행 테이블이 되고 inner table이 후행 테이블이 된다
+
+```sql
+ explain
+ select * from t1 a,t2 b where a.c1 = b.c1
+ and a.c1 >= 1 and a.c1 <= 1000
+ and b.c2 in('A','C');
+```
+
+```
+Nested Loop  (cost=0.29..184.12 rows=5000 width=10)
+  ->  Seq Scan on t2 b  (cost=0.00..1.05 rows=2 width=6) -> 1번 
+"        Filter: ((c2)::text = ANY ('{A,C}'::text[]))"
+  ->  Index Only Scan using idx01_t1 on t1 a  (cost=0.29..66.53 rows=2500 width=4)
+        Index Cond: ((c1 = b.c1) AND (c1 >= 1) AND (c1 <= 1000))
+```
+
+보면 ->가 같은 논리적 레벨 노드이다.
+
+상단에 있는 1번이 outer가 되고 같은 레벨 아래가 2번이 되어 inner가 된다.
+
+NL 조인의 경우 Outer 테이블, Inner 테이블 순서로 실행되고 Top 노드 의 Nested Loop 부분에서 전체 비용을 확인할 수 있다.
+
+##### Hash join
+
+NL조인과 다르게 하단의 inner 테이블이 선행 테이블이 된다.
+
+상단의 outer 테이블이 후행 테이블이다.
+
+```sql
+explain
+select * from t1 a, t2 b where a.c1 = b.c1;
+```
+
+```
+Hash Join  (cost=1.09..283.59 rows=10000 width=10)
+  Hash Cond: (a.c1 = b.c1)
+  ->  Seq Scan on t1 a  (cost=0.00..145.00 rows=10000 width=4)
+  ->  Hash  (cost=1.04..1.04 rows=4 width=6)
+        ->  Seq Scan on t2 b  (cost=0.00..1.04 rows=4 width=6)
+```
+
+#### Sort merge join
+
+같은 레벨의 하단 inner 테이블을 먼저 sorting 한다.
+
+```sql
+explain select * from t1 a, t3 b where a.c1 = b.c1
+and a.c1 >= 1 and a.c1 <= 2 and b.c2 >= 1 and b.c2 <= 200
+order by a.c1;
+```
+
+```
+Merge Join  (cost=0.57..147.26 rows=1000 width=12)
+  Merge Cond: (a.c1 = b.c1)
+  ->  Index Only Scan using idx01_t1 on t1 a  (cost=0.29..124.28 rows=5000 width=4)
+        Index Cond: ((c1 >= 1) AND (c1 <= 2))
+  ->  Index Scan using idx01_t3 on t3 b  (cost=0.29..720.29 rows=3998 width=8)
+        Filter: ((c2 >= 1) AND (c2 <= 200))
+```
+
+## 4. SQL 처리 과정
+
+백엔드 프로세스에서 파싱과정을 거쳐 실행된다. 
+
+![image-20250310182317795](./images//image-20250310182317795.png)
+
+### 4.1 SQL 처리 프로세스
+
+1. parser
+
+![image-20250310182354777](./images//image-20250310182354777.png)
+
+문자열로 입력된 쿼리의 syntax check를 통해 확인하는 단계. 문법상 문제가 없다면 parse tree로 만들어 전달
+
+2. Transaformation
+
+![image-20250310182441581](./images//image-20250310182441581.png)
+
+Parse tree를 전달받아 참조하는 테이블, 함수 및 연산자들에 대한 semantic check(의미 검사) 진행.
+
+검사시 system catalog를 참조
+
+검사가 끝난 후 query tree 생성.
+
+3. Rewriter
+
+query tree를 입력 받아 db에 정의된 규칙에 따라 쿼리 최적화. 필요하면 재작성하거나 변환함.
+
+query tree로 출력해 planner에 전달
+
+4. planner
+
+query tree를 입력받아 최적화된 실행 계획 생성. CBO를 사용하여 가장 적은 비용 방식 선택
+
+Data dictionary에 수집된 테이블 정보, 인덱스 정보를 참조. 
+
+비용 계산을 통해 모든 처리방식을 비교 후 테이블 스캔 방법과 테이블간 조인 방법 결정
+
+**스캔 방식 (Scan Methods)**
+
+| 스캔 방식             | 내용                                                         |
+| --------------------- | ------------------------------------------------------------ |
+| **Seq scan**          | 테이블의 모든 레코드를 차례대로 읽는 방식                    |
+| **Index scan**        | 인덱스를 사용해 필요한 범위의 행을 읽는 방식                 |
+| **Bitmap index scan** | 랜덤 액세스 블록을 줄이기 위해 bitmap 생성을 통해 테이블을 읽는 방식 |
+
+**조인 방식 (Join Methods)**
+
+| 조인 방식            | 내용                                                         |
+| -------------------- | ------------------------------------------------------------ |
+| **Nested loop join** | 한 테이블의 각 행에 대해 다른 테이블을 반복적으로 스캔하는 방식 |
+| **Merge join**       | 두 테이블을 조인키로 정렬한 후, 일치하는 행을 결합하는 방식  |
+| **Hash join**        | 한 테이블을 해시 테이블에 로드하고, 다른 테이블의 행을 해시 테이블과 비교하여 일치하는 행을 찾는 방식 |
+
+최적화된 실행 계획은 plan tree로 작성되고 executor에 전달
+
+4. executor
+
+쿼리 실행 후 결과를 client에 반환. 쿼리 실행시 정렬이나 해시 조인 같이 데이터 저장이 필요한 경우 프로세스별 work_mem을 사용한다. 모자른 경우 임시 파일 temp 영역 사용
+
+### 4.2 Prepare Statement
+
+동일 프로세스에서 동일 쿼리를 반복해서 수행하더라도 PostgreSQL은 파싱 과정을 반복하게 된다.
+
+파싱 과정을 반복하지 않고 실행 계획을 저장하여 재사용하는 방법은 Prepare 구문을 사용하는 것 이다.
+
+Prepare Statement의 작성 방식은 다음과 같다.
+
+```sql
+PREPARE name(data_type , , ...) AS sQL statement
+EXECUTE name(parameter , , ...);
+DEALLOCATE name ;
+prepare t(int) as
+select * from t1 where c1 = $1;
+execute t(4);
+```
+
+접속한 DB 세션에서만 사용 가능하며 접속이 끊어지면 재사용이 불가하다
+
+## 5. 스캔 방법
+
+테이블, 인덱스 스캔 방법은 Sequential, Index, Index Only, Bitmap index scan 등이 있따
+
+### 5.1 Sequential Scan
+
+처음부터 끝가지 풀 테이블 스캔하는 방식.
+
+### 5.2 Index Scan
+
+기본 인덱스는 B-tree 인덱스 구조.
+
+![image-20250310183413745](./images//image-20250310183413745.png)
+
+Index Scan은 Root Node에서 leaf node까지 수직 탐색 후 Leaft node를 수평 스캔한다.
+
+인덱스 스캔 후 인덱스 키에 해당하는 테이블 블록으로 랜덤 액세스 수행.
+
+b-tree의 특징
+
+1. ﻿﻿﻿인덱스는 키 컬럼 순으로 "정렬"되어 있다.
+2. ﻿﻿﻿인덱스와 테이블 정렬 순서에 따라 테이블 블록 액세스 횟수에 차이가 있다.
+
+![image-20250310183442651](./images//image-20250310183442651.png)
+
+인덱스와 테이블 값 정렬이 일치할 경우 랜덤 액세스 하는 블록 수가 줄어든다. 반면
+
+![image-20250310183510460](./images//image-20250310183510460.png)
+
+인덱스 키값과 테이블 키값의 정렬 순서가 다르면, 더 많은 블록에 접근하며 더 많이 I/O가 발생한다.
+
+* 실행계획에서 buffers : shared hit = 16을 체크해야함.
+
+```sql
+explain(analyse , buffers, costs off)
+select * from t1 where c1 >= 20000 and c1 <= 4000
+order by c1;
+```
+
+```
+Index Only Scan using idx01_t1 on t1 (actual time=0.021..0.022 rows=0 loops=1)
+  Index Cond: ((c1 >= 20000) AND (c1 <= 4000))
+  Heap Fetches: 0
+  Buffers: shared hit=2
+Planning Time: 0.130 ms
+Execution Time: 0.062 ms
+```
+
+index scan 분석시, 각 단계별 노드에서 테이블을 스캔하는 오퍼레이션이 보이지 않는다.
+
+따라서, 인덱스와 테이블을 각각 몇 블록 스캔했는지 구분할 수 없다.
+
+만약 인덱스와 테이블의 정렬 구성이 같은 경우 index scan을 사용하지만 그렇지 않은 경우 bitmap index scan이 사용된다. 인덱스와 테이블의 정렬 구성이 다를 경우 테이블 랜덤 /o를 최소화하기 위해 PostgresQL은 bitmap index scan 방식을 적용한다.
+
+만약 비트맵 스캔을 강제로 인덱스 스캔으로 바꾸면 어마어마하게 많은 데이터 블록을 읽게 된다.
+
+### 5.3 Bitmap Index Scan
+
+오비마이저는 테이블 컬럼의 correlation 값을 확인해 인덱스와 테이블의 정렬이 다를 경우 랜덤 IO를 줄이기 위해
+
+bitmap index scan을 선택한다.
+
+Bitmap Index Scan은 **일반적인 Index Scan과 다르게 직접 행을 가져오지 않고**, 먼저 **비트맵(bitmap)** 을 생성한 후 이를 활용하여 효율적으로 테이블을 읽는 방식
+
+* 특정 조건을 만족하는 **많은 수의 행을 검색해야 할 때 성능을 향상시키기 위해** 사용
+
+#### **단계별 동작 과정**
+
+1. 인덱스를 검색하여 해당 행의 위치(TID, Tuple ID)를 가져옴.
+   - 일반적인 `Index Scan`은 인덱스를 따라가면서 하나씩 직접 데이터를 가져오지만, Bitmap Index Scan은 **"이 행이 필요하다"** 라는 정보를 **비트맵 형태로 저장**함.
+2. 비트맵을 생성하여 필요한 블록(페이지)을 그룹화함.
+   - **랜덤 액세스(Random Access)를 최소화하기 위해** 같은 블록에 속하는 TID들을 묶어서 저장함.
+3. 필요한 블록을 한꺼번에 읽어 테이블을 검색함.
+   - 이 과정에서 `Bitmap Heap Scan`이 수행되어, **랜덤 I/O를 줄이고, 연속적인 블록 읽기를 가능하게 함.**
+   - 즉, 인덱스를 따라가며 개별적으로 데이터를 가져오는 것이 아니라, **비트맵을 활용하여 한 번에 많은 데이터를 읽어들임.**
+
+특징 : 
+
+1. ﻿﻿﻿테이블 블록 순서대로 접근하여 인덱스 키순으로 출력되지 않는다.
+2. ﻿﻿﻿테이블 랜덤 1/O 횟수를 최소화한다.
+3. ﻿﻿﻿work_mem 사이즈에 따라 성능 차이가 난다.
+
+
+
+인덱스 스캔을 통해 생성된 bitmap은 테이블 블록 순으로 정렬되고 work_mem 메모리 영역에 생성된다
+
+exact 모드와 lossy 모드로 수행된다.
+
+* exact : work_mem 크기가 충분하여 튜플의 포인터 정보를 bitmap 메모리 공간에 저장할 수 있을때 수행 
+
+* lossy : work_mem 크기에 여유가 없어 레코드가 위치한 블록 정보를 bitmap에 저장하는경우
+
+![image-20250310192526841](./images//image-20250310192526841.png)
+
+* 이 둘은 **bitmap**에 레코드 정보를 직접 저장할 것인가? **레코드가 위치한 블록 정보를 저장할** 것인가 차이
+
+* loccy는 테이블을 한번 더 읽어야 하므로 Recheck 비용이 발생.
+
+Exact 모드로 생성된 bitmap은 테이블의 블록 및 레코드 위치를 저장한다.
+
+![image-20250310192640260](./images//image-20250310192640260.png)
+
+exact 모드의 비트맵 내 1bit는 1개의 레코드를 가리킨다
+
+lossy 모드의 1 bit는 1개의 블록을 가리킨다. 
+
+
+
+### **Bitmap Index Scan vs. Index Scan 비교**
+
+| 스캔 방식             | 설명                                                  | 장점                                                       | 단점                                                 |
+| --------------------- | ----------------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------- |
+| **Index Scan**        | 인덱스를 따라가면서 **각 행을 하나씩 가져오는 방식**  | 개별적인 행을 빠르게 찾을 때 유리                          | 반환해야 할 데이터가 많으면 **랜덤 I/O 비용이 커짐** |
+| **Bitmap Index Scan** | **비트맵을 생성하여 필요한 행들을 한 번에 읽는 방식** | 많은 데이터를 가져와야 할 때 **랜덤 I/O를 줄여 성능 향상** | 소량의 데이터 검색에는 오히려 부담                   |
+
+### 5.4 Index Only Scan
+
+테이블 블록에 접근하지 않고 인덱스 스캔만으로 데이터를 조회하는 방식
+
+인덱스로 이루어진 컬럼만을 조회할때 사용된다
+
+PostgresQL의 Index Only Scan은 테이블의 VM비트열이 allvisible = true 일 때 사용 가능하다. 이 것은 테이블 페이지안의 모든 튜플의 가시성이 보장되어야 한다는 의미이다.
+
+만약 데드 튜플로 인해 allvisible=f 인 페이지가 존재할 경우 인덱스 스캔 후 테이블을 접근할 때 스 냅샷에 해당하는 튜플 버전을 찾아야 하는 과정이 필요하게 되므로 테이블 접근을 해야 한다.
+
+### 5.5 Coverting Index
+
+인덱스 생성시 include 속성을 추가해 Covering Index를 구성할 수 있다.
+
+include 속성은 where 조건절 인덱스 스캔 범위를 결정하는 컬럼은 인덱스 키 컬럼,
+
+select 절에서만 사용하는 컬럼은 include 속성으로 추가해 생성하게 된다
+
+```
+create index idx03_t1 on t1(c1, c2) include (t3);
+```
+
+#### **Covering Index의 개념**
+
+- **일반적인 B-Tree 인덱스**는 **검색 조건(WHERE)과 정렬(ORDER BY)에 사용되는 컬럼**만 저장함.
+- **Covering Index는 추가적인 컬럼을 포함(INCLUDE)하여, 테이블을 조회하지 않고도 인덱스만으로 쿼리를 처리할 수 있도록 함.**
+- **목적:** **디스크 I/O를 줄이고 성능을 향상**시키기 위해 사용됨.
+
+#### **Covering Index (INCLUDE 사용)**
+
+```sql
+CREATE INDEX idx_users_email_covering ON users(email) INCLUDE (name);
+```
+
+- `email` 컬럼을 인덱스 키로 유지하면서, `name` 컬럼을 추가적으로 저장하여 **추가적인 테이블 조회 없이 인덱스에서 직접 가져올 수 있음.**
+- `SELECT email, name FROM users WHERE email = 'test@example.com';` 실행 시 **"Index Only Scan"** 을 사용하여 테이블 조회를 건너뜀.
+
+
+
+include 조건이 포함된 쿼리 실행시, root 노드에서부터 탐색을 시작하여 검색 조건에 해당하는 c1과 c2 인덱스 키를 사용해 b-tree 구조에서 검색을 진행한다.
+
+이후 leaf 노드에서 조건을 만족하는 레코드를 찾고, include 옵션이 포함된 c3 컬럼은 leaf 노드 저장되 있어 테이블을 거치지 않고 바로 출력한다. 
+
+
+
+### **Covering Index vs Index Only Scan 차이점**
+
+| 비교 항목                              | Covering Index                                               | Index Only Scan                                              |
+| -------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
+| **개념**                               | 특정 컬럼을 포함(INCLUDE)하여 테이블을 조회하지 않고도 데이터를 가져올 수 있도록 만든 인덱스 | 인덱스에 있는 데이터만으로 쿼리를 처리하는 최적화된 검색 방식 |
+| **테이블 조회(Heap Access) 필요 여부** | 필요 없음 (필요한 데이터가 인덱스에 모두 포함됨)             | 경우에 따라 MVCC visibility check로 인해 추가 조회 발생 가능 |
+| **설정 방식**                          | `CREATE INDEX idx_name ON table (col) INCLUDE (other_col);`  | 인덱스만으로 데이터를 조회할 수 있을 때 자동 적용            |
+| **장점**                               | 쿼리 성능 향상 (디스크 I/O 최소화), SELECT 쿼리 최적화       | 성능 최적화 가능하지만, MVCC에 따라 Heap 조회가 발생할 수도 있음 |
+| **단점**                               | `INCLUDE`된 컬럼은 `WHERE`, `ORDER BY`에 사용할 수 없음 (단순 저장 용도) | MVCC로 인해 일부 경우 Index Only Scan이 사용되지 않을 수 있음 |
+
+
+
+## 6. 조인 방법
+
+기본 조인 방식 3가지
+
+* NL
+* Hash
+* Merge
+
+### 6.1 Nested Loop Join
+
+외부 루프와 내부 루프를 기반으로 반복적으로 검색. OLTP 업무에 적합
+
+선행 테이블의 초기 건수가 적을수록 전체 루프가 줄어드므로 성능에 유리하다. 
+
+NL 조인 성능에 영향을 미치는 요소는 다음과 같다.
+
+- ﻿﻿선행 테이블 집합의 추출 건수
+- ﻿﻿최초 추출 건수에 대한 후행 테이블의 반복 조인
+- ﻿﻿후행 테이블의 인덱스 효율
+
+먼저 조인에 참여하는 기준이 되는 테이블을 선행 혹은 outer라고 하고, 후에 조인되는 테이블이 후행, inner이다.
+
+선행 테이블의추출 건수만큼 후행 **테이블의 조인키 인덱스를 스캔하**여 부분 범위 처리가 가능하다.
+
+그러나, 조인키 컬럼에 인덱스가 없거나 불필요한 중복 조인으로 조인 횟수가 증가할 경우 NL 조인은
+
+오히려 성능에 불리한 상황을 초래할 수 있다.
+
+PostgresQL은 이와 같이 후행 테이블의 반복 스캔에 의한 비효율성을 최소화하기 위한 방법으로
+
+Materialize, Memoization, Semi/Anti 그리고 Parallel 조인 등을 지원한다.
+
+#### 6.1.1 Materialize
+
+NL조인시 후행 테이블에 적절한 인덱스 없을 경우, I/O 발생을 줄이기 위함
+
+**Nested Loop Join의 내부(inner) 테이블을 캐싱(임시 저장)하여** 같은 데이터를 여러 번 반복적으로 사용하도록 최적화하는 조인 방식
+
+다음과 같이 수행됌 
+
+*  Inner 테이블의 조인 컬럼에 인덱스가 없을 경우 inner 테이블 조회 결과를 materialize 하여 work_mem 메모리 영역에 적재하고 임시 테이블을 만든다.
+
+*  Inner 테이블은 한 번만 seq scan 또는 index scan으로 수행되고 Materialize 된다.
+
+*  Outer 테이블과 Nested Loop 조인 시 데이터가 적재된 임시 테이블을 반복적으로 조인하게 되므로 disk io를 최소화할 수 있다.
+
+*  Outer 테이블의 선행 건수만큼 materialize 된 결값을 가지고 looping 처리된다.
+
+#### 6.1.2 Memoize 조인 (Caching Rows)
+
+NS 조인시 조인키 컬럼의 selectivity가 높아 동일 결괏값을 반복적으로 조인할 경우, 결괏값을 메모리에 저장하여 조인 없이 저장된값을 조회. 
+
+즉, **동일한 키를 여러 번 조회해야 할 경우**, PostgreSQL은 불필요한 재계산을 피하기 위해 **Memoization(메모이제이션) 기법을 사용하여 이전 결과를 캐싱**
+
+Memoize 조인을 위한 필요 조건
+
+- ﻿﻿NL 조인의 조인키 값에 대한 선행 테이블의 Cardinality 값이 2 이상이어야 한다. 조인키가 유 니크한 단일 컬럼이라면 memorize 조인을 수행하지 않는다.
+- ﻿﻿테이블의 통계정보가 수집되어야 한다.
+- ﻿﻿후행 테이블의 조인키 컬럼으로 인덱스가 생성되어야 한다.
+- ﻿﻿선행 테이블 스캔 후 중복으로 제거된 조인키 값의 cardinality 값만큼 후행 테이블에 반복 조인 이 발생한다. 이것은 메모리에 이미 계산된 결값을 저장하고 재사용함으로써 조인 횟수를 효 과적으로 줄일 수 있게 된다.
+- ﻿﻿메모리 공간이 부족할 경우 캐시에 실패하게 되어 메모리에 결값을 저장할 수 없다는 것을 의 미하므로 정상적인 memoize 조인이 불가능하게 된다.
+
+Memoize 조인을 위해 후행 테이블 조인 과정 중 메모리에 저장된 중복 값을 적용하는 방식은 조인 컬 럼의 대표 엔트리 키값과 이를 저장하는 해시 테이블로 구현할 수 있다.
+
+- ﻿﻿선행 테이블에서 중복 제거된 조인키 값들이 메모리의 해시 테이블에 저장된다. 이러한 값들은 후행 테이블과의 조인에 사용된다.
+- ﻿﻿해시 테이블은 선행 테이블의 조인키 값을 저장되는데 사용된다. 실행 계획에서 cache key는 선행 테이블의 조인키 값을 의미한다. 각 행은 조인키 값에 대한 해시값을 기반으로 테이블에 저장된다.
+- ﻿﻿엔트리 키 리스트는 해시 테이블의 데이터 존재 여부를 빠르게 검색하기 위해 사용된다.
+
+메모리가 부족할 수도 있으니, 메모리가 부족한 경우 LRU 리스트로 관뢰더엇, 사용되지 않은 키 값은 메모리에서 제거하여 공간을 확보하고 조인 수행.
+
+장점 
+
+- **반복적인 키 조회 성능 향상** (중복된 키 값을 다시 조회할 때 빠름)
+- **불필요한 인덱스 스캔 감소** (캐싱된 값을 사용하여 인덱스 조회를 줄임)
+- **Nested Loop Join 최적화** (특히 작은 테이블과 조인 시 효과적)
+
+단점
+
+- **메모리 사용 증가** (캐싱을 위해 메모리를 추가로 사용)
+- **큰 테이블에서는 오히려 비효율적** (캐싱 비용이 증가하여 성능이 저하될 수 있음)
+
+NL 조인에서는 후행 테이블을 기준으로 선행 테이블의 조인키 컬럼의 Cardinality를 확인하여
+
+memoize 사용 여부를 결정한다.
+
+선행 테이블인 t1.c1 컬럼은 cardinality가 2로 작기 때문에 중복된 데이터가 많아 memoize 조인을 위해 최적이다.
+
+#### Anti 조인
+
+안티 조인은, 후행 테이블과 일치하는 항목이 없는 경우에만 선행 테이블의 로우를 반환하며, 후행 테이블에서 조건절을 만족하는 행을 찾는 즉시 조인 종료.
+
+**Anti Join**은 **한 테이블에 존재하는 데이터가 다른 테이블에는 존재하지 않는 경우를 찾는 조인 방식**입니다.
+ 쉽게 말해, **"A 테이블에는 있지만 B 테이블에는 없는 데이터"** 를 찾을 때 사용
+
+**대표적인 예:**
+
+- 특정 사용자가 주문을 한 적이 없는 경우 찾기
+- 어떤 제품이 특정 카테고리에 포함되지 않은 경우 찾기
+
+안티 조인은 not exists 연산자를 통해 구현이 가능하다.
+
+* `LEFT JOIN + WHERE IS NULL`, `NOT EXISTS`, `NOT IN` 세 가지 방법이 있음.
+
+* 성능이 중요한 경우**: `NOT EXISTS`가 가장 최적화될 가능성이 높음.
+
+* 작은 데이터셋**에서는 `LEFT JOIN + WHERE IS NULL` 도 괜찮은 선택.
+
+#### 6.1.4 Semi 조인
+
+세미 조인은 후행 테이블에서 조건절을 만족하는 행을 찾는 즉시 조인이 종료된다.
+
+즉 한 테이블에서 다른 테이블과 **매칭되는 행이 존재하는지 여부만 확인하는 조인 방식**
+
+* 일반적인 `INNER JOIN`과 달리, **오른쪽 테이블(B)의 일치하는 행이 여러 개 있어도 한 번만 반환**
+* 즉, **중복된 매칭을 허용하지 않는 조인**
+  *  `EXISTS` 또는 `IN` 연산자를 사용할 때 내부적으로 **Semi Join**으로 최적화될 수 있다.
+
+#### 6.1.5 Lateral Join
+
+**LATERAL JOIN**은 서브쿼리가 **왼쪽 테이블의 각 행에 대해 개별적으로 실행되는 조인 방식**.
+ 즉, **왼쪽 테이블의 값이 서브쿼리에 전달되며, 각 행마다 다른 결과를 반환할 수 있는 유연한 조인 방식**
+
+이는 인라인 뷰 내부에서 사용되는 외부 조인 컬럼의 값은 외부 쿼리로부터 상숫값으로 전달되어서 조인 대상 컬럼의 인덱스 유 무가 성능을 준다. 
+
+```sql
+SELECT * FROM t1, 
+lateral(
+  select c1, max(c2) 
+  from t2 
+  where t1.c2 = t2.c2
+	group by c1
+) v1 
+where t1.c2 between 1 and 10;
+```
+
+#### 6.1.6 Parallel Mode
+
+쿼리당 2개 이상의 CPU 코어를 사용하는 기능
+
+Parallel 쿼리에서 옵티마이저는 쿼리 작업을 더 작은 부분으로 나누고 각 작업을 여러 CPU 코어에 분산.
+
+**대량의 데이터를 처리할 때 여러 개의 워커(Worker) 프로세스를 사용하여 성능을 최적화함.** 
+  **특히, `Seq Scan`, `Index Scan`, `Aggregate`, `Join` 등에 병렬 처리가 적용될 수 있음.**
+
+Parallel 프로세스는 다음과 같이 크게 3가지 절차에 의해 수행된다.
+
+- ﻿﻿분할(Distribution) : 병렬 처리를 위해 조인 대상 테이블이 각 워커 프로세스에 분할된다. 일반 적으로 조인 대상 테이블의 데이터를 블록 단위로 분할하는 방식으로 이루어진다.
+- ﻿﻿조인 처리(Join Processing) : 분할된 조인 대상 테이블 간에 각 워커 프로세스에서 NL 조인이 수행된다. 각 워커는 자신이 소유한 데이터 블록을 메모리로 읽어와 다른 조인 대상 테이블과 조인을 수행한다.
+- ﻿﻿결과 병합(Merge Results) : 각 워커 프로세스에서 생성된 조인 결과가 마스터 프로세스로 다 시 병합된다. 이 과정에서 중복된 결과가 제거되고 최종 결과가 생성된다.
+
+아래 상황은 Parallel mode를 지원하지 않는다 
+
+- ﻿﻿CREATE TABLE AS SELECT(CTAS)
+
+- ﻿﻿SELECT INTO
+- ﻿﻿CREATE MATERIALIZED VIEW
+- ﻿﻿REFRESH MATERIALIZED VIEW
+
+**다음과 같은 연산에서 병렬 처리가 가능함** 🚀
+
+| 병렬 처리 연산                | 설명                                    |
+| ----------------------------- | --------------------------------------- |
+| **Parallel Sequential Scan**  | 테이블을 여러 개의 Worker가 나누어 읽음 |
+| **Parallel Index Scan**       | 인덱스를 병렬로 검색                    |
+| **Parallel Bitmap Heap Scan** | 비트맵 인덱스를 활용하여 병렬로 검색    |
+| **Parallel Aggregation**      | SUM, COUNT, AVG 등의 집계를 병렬로 수행 |
+| **Parallel Hash Join**        | 두 개의 테이블을 병렬로 조인            |
+| **Parallel Nested Loop Join** | 중첩 루프 조인을 병렬로 실행            |
+| **Parallel Merge Join**       | 정렬된 데이터를 병렬로 병합             |
+
+**실행 계획 예시:**
+
+```
+Gather  (cost=1000.00..50000.00 rows=1000000 width=64)
+   Workers Planned: 4
+   ->  Parallel Seq Scan on large_table  (cost=0.00..40000.00 rows=250000 width=64)
+```
+
+🔹 **`Gather` 노드**: 여러 개의 Worker 프로세스가 데이터를 처리한 후 **최종 결과를 수집**하는 과정
+ 🔹 **`Parallel Seq Scan`**: Worker 프로세스가 테이블을 나누어 읽고 있음
+
+parallel mode 관련하여 제공되는 파라미터는 다음과 같다.
+
+### **PostgreSQL Parallel Mode 관련 파라미터 정리**
+
+| 파라미터                            | 단위     | 기본값 | 설명                                                         |
+| ----------------------------------- | -------- | ------ | ------------------------------------------------------------ |
+| **max_parallel_workers_per_gather** | Integer  | 2      | 단일 `Gather` 또는 `Gather Merge` 노드에서 시작할 수 있는 최대 작업자 수. 해당 값이 `0`일 경우 병렬 모드가 비활성화됨. |
+| **max_parallel_workers**            | Integer  | 8      | 시스템이 병렬 작업을 지원할 수 있는 최대 작업자 수.          |
+| **max_worker_processes**            | Integer  | 8      | 시스템이 지원할 수 있는 최대 백그라운드 프로세스 수.         |
+| **parallel_tuple_cost**             | Floating | 0.1    | 하나의 튜플을 병렬 작업자 프로세스에서 다른 프로세스로 전송하는 비용에 대한 플래너의 추정치. |
+| **parallel_setup_cost**             | Integer  | 1000   | 병렬 처리 시 워커 프로세스를 할당하는 데 필요한 사전 작업 비용. |
+| **parallel_leader_participation**   | Boolean  | on     | 리더 프로세스가 워커 프로세서가 데이터를 읽는 동안 `Gather` 및 `노드`에서 쿼리를 실행할 수 있도록 함. |
+| **min_parallel_table_scan_size**    | Integer  | 8MB    | 병렬 스캔을 고려하기 위해 스캔해야 하는 테이블 데이터의 최소 크기 설정값. |
+| **min_parallel_index_scan_size**    | Integer  | 512KB  | 병렬 스캔을 고려하기 위해 스캔해야 하는 인덱스의 최소 크기 설정값. `VACUUM` 시에도 해당 파라미터를 통해 병렬로 수행됨. |
+
+### 6.2 Hash Join
+
+조인대상 테이블 모두 대량의 데이터를 조인할 경우 적용되는 조인 방식
+
+두단계로 진행된다
+
+1. inner table에 조인 컬럼 기준으로 해시 함수 적용하여 해시 테이블 생성. backend process의 work_mem 영역에 생성. 버킷의 수는 2의 거듭제곱만큼 최소 1024개 생성. 조인 대상 중 작은 테이블이 해시 테이블을 만드는 테이블이 된다
+2. outer 테이블에 해시 함수를 적용하여 앞에서 생성된 해시 테이블을 검색하여 동일 행을 추출한다
+
+hash 조인의 성능은 work_mem에서 한 번에 모든 데이터를 읽을 때 가장 이상적이며 메모리 공간이 부족 할 경우 temp 테이블스페이스를 사용하게 된다. temp의 사용 여부에 따라 one/two pass hash 조인으로 구분할 수 있다.
+
+#### One-Pass Hash Join
+
+build 테이블 (inner)의 해시 테이블이 work_mem 메모리 공간에 완전히 저장될 때 사용하는 조인 방식.
+
+메모리에서만 처리되므로 디스크 I/O 작업이 줄어들어 성능 개선에 효과적
+
+* bucket은 해시 조인에 사용되는 해시 테이블의 각 슬롯이다.
+  * 해시값을 기반으로 행을 저장하는 컨테이너
+  * 해시 함수에 따라 버킷 수가 결정되며, 해시 충돌 최소화를 위해 조절됌
+
+![image-20250310203357887](./images//image-20250310203357887.png)
+
+Hash 조인은 Equi Join 조건이 있어야만 적용되는데 NL 조인과 비교하여 선행 건수만큼 반복 조인을 수행하지 않고 한 번에 전체 데이터를 조인하므로 대량의 데이터 처리 시 효과적이다.
+
+실행 계획에서 버킷 수, 메모리 사용량이 다 나온다.
+
+#### 6.2.2 Two-Pass Hash Join
+
+Two-Pass hash 조인은 build 테이블의 해시 테이블이 할당된 메모리를 초과했을 때,
+
+ build 단계의 생성된 버킷은 여러 번의 배치로 파티셔닝 되어 처리된다.
+
+**Two-Pass Hash 조인 수행 절차**
+
+TWo pass hash 조인의 특징은 buildprobe 단계에서 최초 0번 파티션만 work_mem 내 해시 테이 블에 적재 후 1번부터 N번까지의 파티션들은 temp 테이블스페이스에 적재된다.
+
+크게 build와 probe 단계로 나누어 수행된다
+
+### 6.3 Sort Merge Join
+
+Merge Join은 두개의 정렬된 테이블을 병합하여 조인함.
+
+두 테이블 모두 사전에 정렬한 후, 각 테이블의 첫번 째 행을 비교하면서 일치하는 행을 찾아 병합한다.
+
+* 정렬하므로 조인 컬럼의 정렬된 인덱스 사용시 효율적. 
+
+➡ **일반적으로 `Nested Loop Join`보다 빠르며, `Hash Join`보다 유리한 경우도 있음**
+
+실행계획에  다음과 같이 나온다
+
+```
+Sort(actual time=12.452.. 12.453 rows=10 loops=1)
+Sort Key: c3 DESC
+Sort Method: top-N heapsort Memory: 25kB
+```
+
+Sort merge 조인 처리 절차는 다음과 같다.
+
+- ﻿﻿각각의 조인 대상 테이블을 조인 대상 컬럼 기준으로 정렬한다.
+- ﻿﻿두 테이블의 첫 번째 행을 비교한다.
+- ﻿﻿두 행이 일치하면 조인 성공, 다음 행으로 이동한다.
+- ﻿﻿두 행이 일치하지 않을 경우 조인 조건을 만족하는지 확인하기 위해 다음 행으로 이동한다.
+- ﻿﻿위 단계를 반복하여 모든 행을 처리한다.
+
+PostgresQL은 쿼리에서 요청하는 정렬 데이터를 
+
+Quicksort, External, Top-N heapsort, incremental sort의 4가지 방식으로 처리한다. 
+
+이러한 정렬 처리 방식은 개별 세션 메모리 영역인 work_mem에서 처리되며 
+
+메모리가 부족할 경우 temp 테이블스페이스에서 처리된다.
+
+* Quicksort : 모든 데이터를 정렬 처리할 경우 발생 
+* External sort : 메모리에서 모두 정렬할 수 없는 경우에 사용. temp 테이블 스페이스를 이용함 느림
+* top-n heap sort : 상위 n개의 값만 정렬하는 방식. limit 또는 between과 함께 사용시 수행됌
+
+* incremental sort : 메모리에서 청크 단위로 나누어 적재 후 점진적으로 정렬함. 
+  * 대량의데이터 셋에서 유리
+  * 동작 조건:
+    * ﻿﻿"order by" 구문의 선두 컬럼으로 인덱스가 생성되어야 한다. 이는 인덱스의 정렬을 보장하는 속성을 활용하기 위함이다.
+    * ﻿﻿주로 "order by" 절이나 "distinct" 등의 연산이 포함된 쿼리에서 사용된다. 이러한 연산이 있는 쿼리에서는 정렬이 필요하므로 incremental sort가 적용될 수 있다.
+    * ﻿﻿메모리에 한 번에 로드할 수 없는 크기의 대용량의 데이터 셋. 이런 경우에는 incremental sort을 사용하여 데이터를 청크 단위로 적재 후 정렬한다.
+
+
+
+# 격리 수준에 따른 이상 현상
+
+### Read Commited
+
+pg는 기본적으로 read commiteed . dirty read를 허용하지 않음. 
+
+하지만 아래와 같은 이상 현상 발생 가능
+
+* Non-Repetable Read : 동일 트랜잭션에서 같은 쿼리 두번 실행시 각자 다른값으로 조회되는 현상 
+* Phantom read : 동일 트랜 잭션 내에서 처음 조회했을 때 없었던 값이 조회됌. 
+* Read Skew : 여러 레코드를 순차적으로 조회하는 과정에 특정 레코드가 다른 트랜잭션에 의해 변경될 경우 집계한 결괏값이 다르게 보여지는 현상 
+* Lost Update : 갱신 손실. 두 트랜잭션이 하나의 레코드를 업데이트 할 때, 둘중 하나의 갱신 연산은 변경처리 되지 않는것. 
+
+
+
+### Repeatable Read
+
+동일 트랜잭션에서 같은 쿼리를 여러번 실행해도 같은 결과가 반환되도록 보장하는 격리 수준
+
+Repeatable read 격리 수준은 한 트랜잭션 안에서 한 번 조회한 데이터는 다시 조회해도 동일하게 보 여야 한다는 규칙 때문에 Lost update가 발생하지 않는다.
+
+
+
+그러나 Write Skew 현상이 발생함.
+
+**`REPEATABLE READ` 트랜잭션 격리 수준에서 발생하는 데이터 불일치(anomaly) 현상** 중 하나
+ 즉, **두 개 이상의 트랜잭션이 동시에 읽고(write 전 읽기) 서로의 변경을 고려하지 않고 데이터를 수정하면서 논리적 무결성이 깨지는 현상**을 의미.
+
+lost update, dirty write를 모두 포함하는 개념으로 이해할 수도 있음. 
+
+#### 비정상 read-only transaction
+
+repeatable read 격리 수준에서만 발생하는 이상현상으로, 읽기 전용 트랜잭션에서 발생
+
+트랜잭션 시작 시점과 커밋 시점에 따라 값이 변경된 것 처럼 보이게 되는 이상 현상.
+
+결론적으로 다른 트랜잭션에서 변경된 값을 확인하기 위해서는 트랜잭션을 종료하고 새로운 트랜작 션을 시작해야만 볼 수 있는 것이다.
+
+
+
+
+
+# SQL 모니터링
+
+SQL 모니터링 도구로 pg_stat_statements와 pg_stat_monitor 뷰를 사용 가능
+
+
+
+## pg_stat_statements
+
+이 모듈은 pg_stat_statements 익스텐션를 통해 SQL 성능 통계 를 제공하는 뷰 형태로 결과를 반환한다
+
+```
+create extension pg_stat_statements
+```
+
+| 파라미터                          | 단위    | 기본값 | 설명                                                         |
+| --------------------------------- | ------- | ------ | ------------------------------------------------------------ |
+| pg_stat_statements.max            | Integer | 5000   | 수집 대상 최대 SQL 수. (DB 재기동 필요)                      |
+| pg_stat_statements.track          | enum    | top    | 수집 대상 SQL TEXT 구분- top: 클라이언트로 수행된 SQL- all: 함수 내에서 수행된 SQL까지 모두 수집- none: SQL TEXT는 수집하지 않음 |
+| pg_stat_statements.track_utility  | boolean | on     | SELECT, INSERT, UPDATE, DELETE, MERGE 이외의 모든 명령어 수집 |
+| pg_stat_statements.track_planning | boolean | off    | 실행계획 수집 여부. 성능 저하가 발생할 수 있으므로 off 권고  |
+| pg_stat_statements.save           | boolean | on     | 서버 종료 시 수집된 통계 저장 여부                           |
+
+상세한 SQL 수행 이력 정보가 없어 분석이 쉽지 않음. 때문에 pg_stat_monitor 사용
+
+## pg_stat_monitor
+
+시간대별로 성능 통게 확인 가능.
+
+```
+apt update && apt install -y curl
+```
+
+설치가 완료되었는지 확인:
+
+```
+curl --version
+```
+
+출력 결과에 `curl` 버전이 표시되면 정상적으로 설치된 것입니다.
+
+### **2️⃣ Percona 저장소 추가**
+
+이제 다시 `percona-release` 패키지를 설치합니다.
+
+```
+wget https://repo.percona.com/apt/percona-release_latest.bookworm_all.deb
+dpkg -i percona-release_latest.bookworm_all.deb
+```
+
+이 과정이 정상적으로 완료되었는지 확인하려면:
+
+```
+percona-release show
+```
+
+출력 결과에 Percona 관련 저장소가 표시되면 성공입니다.
+
+### **3️⃣ Percona PostgreSQL 17 저장소 활성화**
+
+```
+percona-release setup ppg-17
+```
+
+### **4️⃣ `pg_stat_monitor` 설치**
+
+이제 `pg_stat_monitor`를 설치합니다.
+
+```
+apt update
+apt install -y percona-pg-stat-monitor17
+```
+
+설치가 완료되었는지 확인:
+
+이후
+
+```
+create extension pg_stat_monitor;
+
+```
+
+pg_stat_monitor의 특징은 다음과 같다.
+
+- ﻿﻿pg_stat_statements는 SQL이 종료되어야 관련 정보가 저장되었다면 pg_stat_monitor의 경 우 bucket_done 데이터를 통해 현재 SQL 수행 완료 여부를 체크할 수 있다. 즉, 컬럼값이
+   "False"일 경우 SQL이 완료되지 않은 상태를 의미한다.
+- ﻿﻿설정된 시간 간격 별로 실제 SQL의 수행 시간을 확인할 수 있다.
+- ﻿﻿Client 정보(client ip, username, application name)를 담고 있어 SQL 수행 주체를 확인할 수 있다.
+- ﻿﻿SQL 오류 정보를 담고 있어 마이그레이션 혹은 개발단계 및 운영환경 등에서 비정상 종료된
+   SQL 정보를 확인할 수 있다.
+- ﻿﻿함수, 프로시저 내부에서 수행되는 Recursive SQL 추적이 가능하다.
+
+
+
+설치
+
+```
+wget https://github.com/ossc-db/pg_hint_plan/archive/refs/tags/REL17_1_7_0.zip
+
+tar -zxvf REL17_1_7_0.tar.gz
+
+
+cd pg_hint_plan-REL17_1_7_0/
+
+apt update && apt install -y flex bison
+
+make && make install
+
+cd /var/lib/postgresql/data
+
+vi postgresql.conf
+
+shared_preload_libraries = 'pg_hint_plan,pg_stat_monitor'
+```
+
+
+
+#### Bucket_start time 컬럼을 이용한 기간별 TopSQL 추출
+
+bucket_start_time 컬럼을 이용하여, 특정 기간동안 수행된 SQL의 성능이력을 추출할 수 있다.
+
+```sql
+select queryid,
+       substring( max( query ) , 0 , 40 ) as sql_text ,
+       sum( calls ) as tot_exec ,
+       sum( total_exec_time )/1000 as tot_exec_time_sec ,
+       sum( total_plan_time )/1000 as tot_plan_time_sec ,
+       sum( total_exec_time )/1000 / sum( calls ) as avg_exec_time_per_sql ,
+       sum( total_plan_time )/1000 / sum( calls ) as avg_plan_time_per_sql ,
+       sum( shared_blks_hit ) as tot_shared_blks_hit ,
+       sum( shared_blks_read ) as tot_shared_blks_read ,
+       sum( shared_blks_dirtied ) as tot_shared_blks_dirtied ,
+       sum( shared_blks_written ) as tot_shared_blks_written ,
+       sum( shared_blks_hit ) / sum( calls ) as shared_blks_hit_per_sql ,
+       sum( shared_blks_read ) / sum( calls ) as shared_blks_read_per_sql ,
+       sum( shared_blks_dirtied ) / sum( calls ) as shared_blks_dirtied_per_sql ,
+       sum( shared_blks_written ) / sum( calls ) as shared_blks_written_per_sql,
+ 100.0 * sum(shared_blks_hit) / sum(nullif(shared_blks_hit + shared_blks_read, 0)) as hit_percent
+ from   pg_stat_monitor pgsm
+ where  bucket_start_time between '2024-01-01' and now()
+ group  by queryid
+ having sum( calls ) > 0
+ order  by tot_shared_blks_read desc
+ limit 100;
+```
+
+• SQL 에러 모니터링
+
+비정상 종료된 SQL에 대한 오류 정보를 확인할 수 있다. 상세한 오류 정보는 아래 URL을 통해 확인 가능하다.
+
+```sql
+ select substr(query,0,50) as query,
+ decode_error_level(elevel) as elevel,
+ sqlcode,
+ calls,
+ substr(message,0,50) message
+ from pg_stat_monitor
+ where message is not null; 
+```
+
