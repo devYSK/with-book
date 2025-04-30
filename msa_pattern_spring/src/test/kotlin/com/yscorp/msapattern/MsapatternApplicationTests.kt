@@ -1,0 +1,13 @@
+package com.yscorp.msapattern
+
+import org.junit.jupiter.api.Test
+import org.springframework.boot.test.context.SpringBootTest
+
+@SpringBootTest
+class MsapatternApplicationTests {
+
+    @Test
+    fun contextLoads() {
+    }
+
+}
