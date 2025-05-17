@@ -105,13 +105,15 @@ services:
       - kafka3
     networks:
       - kafka-net
+
   schema-registry:
     image: confluentinc/cp-schema-registry:latest
     container_name: schema-registry
     depends_on:
       - kafka1
     environment:
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka:9092
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka1:29091,kafka2:29092,kafka3:29093
+
       SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
       SCHEMA_REGISTRY_HOST_NAME: schema-registry
     ports:
