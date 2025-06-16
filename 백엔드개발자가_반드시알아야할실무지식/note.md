@@ -1319,6 +1319,160 @@ CAP 정리에 따라 3가지 종류 DB로 나눌 수 있음
 
 # **부록 C: DB로 분산 잠금 구현하기**
 
-잠금 정보 저장 테이블
-분산 잠금 동작
-DB 잠금 구현
+레디스나 주키퍼 없이 구현해보자 
+
+## 잠금 정보 저장 테이블
+
+```
+| Column  | Type           | Description            |
+|---------|----------------|------------------------|
+| name    | varchar(100)   | Lock 이름 (고유 식별자) |
+| owner   | varchar(100)   | 락 소유자 (서버 또는 인스턴스 ID 등) |
+| expiry  | timestamp      | 락 만료 시간             |
+```
+
+* name : 잠금 키
+* owner : 잠금 소유자를 구분하기 위한 값
+* expiry : 잠금 소유 만료시간
+
+```sql
+CREATE TABLE dist_lock 
+(
+  name varchar(100) NOT NULL COMMENT '락 이름',
+  owner varchar(100) COMMENT '락 소유자',
+  expiry datetime COMMENT '락 만료 시간',
+  PRIMARY KEY (name)
+)
+```
+
+## 분산 잠금 동작
+
+분산 잠금이 필요한 스레드는 다음 절차에 따라 잠금을 획득한다.
+
+1. ﻿﻿﻿트랜잭션을 시작한다.
+2. ﻿﻿﻿선점 잠금 쿼리(for update)를 이용해 해당 행을 점유한다.
+3. ﻿﻿﻿행이 없으면 잠금 테이블에 새로운 데이터를 추가한다.
+4. ﻿﻿﻿owner가 다른데 아직 expiry가 지나지 않았다면, 잠금 획득에 실패한다.
+5. ﻿﻿﻿owner가 다른데 expiry가 지났다면, owner와 expiry 값을 변경한 후 잠금을 획득한다.
+6. ﻿﻿﻿owner가 같다면 expiry만 갱신한 후 잠금을 획득한다.
+7. ﻿﻿﻿트랜잭션을 커밋하고 소유 결과를 리턴한다.
+8. ﻿﻿﻿트랜잭션 커밋에 실패하면 잠금 획득도 실패한다.
+
+이 절차에 따라 잠금 소유에 성공했다면 원하는 기능을 실행하고, 실패했다면 기능을 실행하지 않도록 구현한다.
+
+## DB 잠금 구현
+
+```kotlin
+package distlock
+
+import java.sql.Connection
+import java.sql.Timestamp
+import java.time.Duration
+import java.time.LocalDateTime
+import javax.sql.DataSource
+
+data class LockOwner(val owner: String?, val expiry: LocalDateTime?) {
+    fun isOwnedBy(requestedOwner: String): Boolean = owner == requestedOwner
+    fun isExpired(): Boolean = expiry?.isBefore(LocalDateTime.now()) ?: true
+}
+
+class DistLock(private val dataSource: DataSource) {
+
+    fun tryLock(name: String, owner: String, duration: Duration): Boolean {
+        var conn: Connection? = null
+        return try {
+            conn = dataSource.connection
+            conn.autoCommit = false
+
+            val lockOwner = getLockOwner(conn, name)
+
+            val acquired = when {
+                lockOwner == null || lockOwner.owner == null -> {
+                    insertLockOwner(conn, name, owner, duration)
+                    true
+                }
+                lockOwner.isOwnedBy(owner) -> {
+                    updateLockOwner(conn, name, owner, duration)
+                    true
+                }
+                lockOwner.isExpired() -> {
+                    updateLockOwner(conn, name, owner, duration)
+                    true
+                }
+                else -> false
+            }
+
+            conn.commit()
+            acquired
+        } catch (e: Exception) {
+            rollback(conn)
+            false
+        } finally {
+            close(conn)
+        }
+    }
+
+    private fun getLockOwner(conn: Connection, name: String): LockOwner? {
+        val sql = "SELECT * FROM dist_lock WHERE name = ? FOR UPDATE"
+        conn.prepareStatement(sql).use { pstmt ->
+            pstmt.setString(1, name)
+            pstmt.executeQuery().use { rs ->
+                return if (rs.next()) {
+                    val owner = rs.getString("owner")
+                    val expiry = rs.getTimestamp("expiry")?.toLocalDateTime()
+                    LockOwner(owner, expiry)
+                } else {
+                    null
+                }
+            }
+        }
+    }
+
+    private fun insertLockOwner(conn: Connection, name: String, ownerId: String, duration: Duration) {
+        val sql = "INSERT INTO dist_lock (name, owner, expiry) VALUES (?, ?, ?)"
+        conn.prepareStatement(sql).use { pstmt ->
+            pstmt.setString(1, name)
+            pstmt.setString(2, ownerId)
+            pstmt.setTimestamp(3, getExpiry(duration))
+            pstmt.executeUpdate()
+        }
+    }
+
+    private fun updateLockOwner(conn: Connection, name: String, owner: String, duration: Duration) {
+        val sql = "UPDATE dist_lock SET owner = ?, expiry = ? WHERE name = ?"
+        conn.prepareStatement(sql).use { pstmt ->
+            pstmt.setString(1, owner)
+            pstmt.setTimestamp(2, getExpiry(duration))
+            pstmt.setString(3, name)
+            pstmt.executeUpdate()
+        }
+    }
+
+    private fun getExpiry(duration: Duration): Timestamp =
+        Timestamp.valueOf(LocalDateTime.now().plusSeconds(duration.seconds))
+
+    private fun rollback(conn: Connection?) {
+        try {
+            conn?.rollback()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun close(conn: Connection?) {
+       if (conn != null) {
+         try {
+           conn.setAutoCommit(false);
+         } catch(_: SQLException) {
+           
+         }
+         try {
+           conn.close();
+         } catch(_: SQLException) {
+           
+         }
+       }
+    }
+}
+
+```
+
